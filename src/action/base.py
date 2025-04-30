@@ -1,0 +1,140 @@
+from abc import abstractmethod
+from enum import Enum, auto
+from typing import Any, List, NamedTuple, Optional, Tuple
+from utils.logging_utils import setup_logger, log_exception
+
+######
+# BASE TYPES
+######
+
+
+class Action:
+    """
+    Representation of an action given by a action model using a structured format
+    """
+
+    def __init__(
+        self,
+        prompt: List[dict[str, str]],
+        action_target: str | None,
+        raw: str,
+        action: Optional[str] = None,
+        reasoning: Optional[List[str | Any] | str] = None,
+        coords: Optional[Tuple[float, float]] = None,
+        key: Optional[str] = None,
+    ):
+        if coords and key:
+            raise ValueError("Coords and Key are mutually exclusive")
+        self.prompt = prompt
+        self.action = action
+        self.action_target = action_target
+        self.raw = raw
+        self.reasoning = reasoning  # optional
+        self.coords = coords  # optional
+        self.key = key  # optional
+        self.logger = setup_logger(f"{self.__class__.__module__}.{self.__class__.__name__}")
+        self.logger.debug(f"Action created: {action} on target: {action_target}")
+
+    def __str__(self):
+        return f"""
+Model Reasoning: {self.reasoning}
+---
+Provided action: {self.action} {self.action_target} {self.key if self.key else self.coords if self.coords else ""}
+"""
+
+    def to_str_extended(self):
+        return f"""
+Prompt: {self.prompt}
+---
+Raw Output: {self.raw}
+---
+Model Reasoning: {self.reasoning}
+---
+Provided action: {self.action} {self.action_target} {self.key if self.key else self.coords if self.coords else ""}
+"""
+
+
+class ActionResult(Enum):
+    FAIL = auto()
+    PENDING = auto()
+    SUCCESS = auto()
+
+    def __str__(self):
+        return self.name
+
+
+class ActionExecution(NamedTuple):
+    action: Action
+    result: ActionResult
+
+
+class History:
+    """
+    Stores past actions for an ongoing task execution and its corresponding results
+    """
+
+    def __init__(
+        self,
+        actions: List[Action] = [],
+        results: List[ActionExecution] = [],
+    ):
+        self.actions = actions
+        self.results = results
+        self.logger = setup_logger(f"{self.__class__.__module__}.{self.__class__.__name__}")
+        self.logger.debug(f"History initialized with {len(actions)} existing actions")
+
+    def __iter__(self):
+        return self.results
+
+    def __str__(self):
+        return "\n".join([f"Executed {action} with result {result}" for action, result in self.results])
+
+    @property
+    def last_result(self):
+        last = next(iter(self.results[-1:]), None)
+        return last.result if last else None
+
+    def append(self, action: Action, result: ActionResult):
+        self.actions.append(action)
+        self.results.append(ActionExecution(action, result))
+        self.logger.info(f"Added action to history: {action.action} with result: {result}")
+        if result == ActionResult.FAIL:
+            self.logger.warning(f"Action failed: {action.action} on target: {action.action_target}")
+
+
+######
+# INTERFACES
+#####
+
+
+class ActionInterface:
+    def __init__(self):
+        self.logger = setup_logger(f"{self.__class__.__module__}.{self.__class__.__name__}")
+        self.logger.debug(f"Initialized {self.__class__.__name__}")
+        
+    @abstractmethod
+    def action(self, sys_prompt, user_prompt, *args, **kwargs) -> Action:
+        """
+        Creates an action for a current state of the desktop given a action and an action to execute
+
+        @param sys_prompt: The system prompt to give to the model
+        @param user_prompt: User textual prompt for the model
+
+        @returns Action object
+
+        Additionally kwargs can be provided to include extra messages with the user role, such as an image.
+        """
+
+        pass
+
+    @abstractmethod
+    def parse_action(self, prompt: list[dict[str, str]], model_response: str) -> Action:
+        """
+        Given a action in string format, it parses it and returns a Action object
+
+        @param prompt: The prompt given to the model
+        @param action: Output of action method
+
+        @returns Action object
+        """
+        pass
