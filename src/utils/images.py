@@ -7,8 +7,8 @@ import base64
 def im_2_b64(image: Image.Image) -> str:
     buff = BytesIO()
     aspect_ratio = image.size[0] / image.size[1]
-    max_height = 1080
-    max_width = 1920
+    max_height = 720
+    max_width = 1280
     if image.size[0] > max_width:
         image = image.resize((max_width, int(max_width / aspect_ratio)))
     if image.size[1] > max_height:
@@ -20,8 +20,8 @@ def im_2_b64(image: Image.Image) -> str:
 
 def resize_img(image):
     aspect_ratio = image.size[0] / image.size[1]
-    max_height = 1080
-    max_width = 1920
+    max_height = 720
+    max_width = 1280
     if image.size[0] > max_width:
         image = image.resize((max_width, int(max_width / aspect_ratio)))
     if image.size[1] > max_height:

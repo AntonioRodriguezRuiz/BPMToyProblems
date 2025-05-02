@@ -175,9 +175,7 @@ if __name__ == "__main__":
     args = parse_args()
     
     if args.debug:
-        logging.getLogger().setLevel(logging.DEBUG)
-    else:
-        logging.getLogger().setLevel(getattr(logging, args.log_level))
+        logger.setLevel(logging.DEBUG)
     
     try:
         logger.info("Starting application")
@@ -239,6 +237,6 @@ if __name__ == "__main__":
         logger.error("Application terminated due to an error in the task execution")
         sys.exit(1)
     except Exception as e:
-        log_exception(logger, e)
+        # log_exception(logger, e)
         logger.critical("Application terminated with an unhandled exception")
         sys.exit(1)
