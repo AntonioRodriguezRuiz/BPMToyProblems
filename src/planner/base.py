@@ -19,8 +19,6 @@ class Plan:
         self.raw = raw
         self.reasoning = reasoning
         self.steps = steps
-        self.logger = setup_logger(f"{self.__class__.__module__}.{self.__class__.__name__}")
-        self.logger.debug(f"Plan created with {len(steps)} steps")
 
     def __str__(self):
         return f"""
@@ -42,10 +40,6 @@ Provided steps: {self.steps}
 
 
 class PlannerInterface:
-    def __init__(self):
-        self.logger = setup_logger(f"{self.__class__.__module__}.{self.__class__.__name__}")
-        self.logger.debug(f"Initialized {self.__class__.__name__}")
-
     @abstractmethod
     def plan(self, sys_prompt, user_prompt, *args, **kwargs) -> Plan:
         """

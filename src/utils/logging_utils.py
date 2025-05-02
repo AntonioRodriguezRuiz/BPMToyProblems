@@ -5,6 +5,13 @@ import time
 from datetime import datetime
 import traceback
 import json
+import pprint as pp
+
+# Define custom exception to prevent multiple error logging
+class LoggedException(Exception):
+    """Custom exception to prevent multiple error logging."""
+    def __init__(self):
+        super().__init__()
 
 # Configure logger
 def setup_logger(name, log_level=logging.INFO, log_file=None):
@@ -69,7 +76,7 @@ def log_exception(logger, e, context=None):
     error_details = {
         "exception_type": type(e).__name__,
         "exception_message": str(e),
-        "traceback": stack_trace
+        "traceback": pp.pformat(stack_trace, indent=4)
     }
     
     # Add context if provided
@@ -78,7 +85,7 @@ def log_exception(logger, e, context=None):
     
     # Log the error with details
     logger.error(f"Exception occurred: {type(e).__name__}: {str(e)}")
-    logger.debug(f"Error details: {json.dumps(error_details, indent=2)}")
+    logger.error(f"Error details: {json.dumps(error_details, indent=2)}")
 
 def log_function_entry_exit(logger, level=logging.DEBUG):
     """

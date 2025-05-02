@@ -32,8 +32,6 @@ class Action:
         self.reasoning = reasoning  # optional
         self.coords = coords  # optional
         self.key = key  # optional
-        self.logger = setup_logger(f"{self.__class__.__module__}.{self.__class__.__name__}")
-        self.logger.debug(f"Action created: {action} on target: {action_target}")
 
     def __str__(self):
         return f"""
@@ -80,8 +78,6 @@ class History:
     ):
         self.actions = actions
         self.results = results
-        self.logger = setup_logger(f"{self.__class__.__module__}.{self.__class__.__name__}")
-        self.logger.debug(f"History initialized with {len(actions)} existing actions")
 
     def __iter__(self):
         return self.results
@@ -97,9 +93,6 @@ class History:
     def append(self, action: Action, result: ActionResult):
         self.actions.append(action)
         self.results.append(ActionExecution(action, result))
-        self.logger.info(f"Added action to history: {action.action} with result: {result}")
-        if result == ActionResult.FAIL:
-            self.logger.warning(f"Action failed: {action.action} on target: {action.action_target}")
 
 
 ######
@@ -108,10 +101,6 @@ class History:
 
 
 class ActionInterface:
-    def __init__(self):
-        self.logger = setup_logger(f"{self.__class__.__module__}.{self.__class__.__name__}")
-        self.logger.debug(f"Initialized {self.__class__.__name__}")
-        
     @abstractmethod
     def action(self, sys_prompt, user_prompt, *args, **kwargs) -> Action:
         """

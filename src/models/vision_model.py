@@ -12,8 +12,9 @@ from transformers import (
 )
 
 from PIL import Image
-import utils.images as images_utils
+
 from models.base import ModelInterface
+import utils.images as images_utils
 
 
 class VisionModel(ModelInterface):
@@ -235,3 +236,13 @@ class VisionModel(ModelInterface):
         )
         processor = AutoProcessor.from_pretrained(self.model_name)
         return model, processor
+
+if __name__ == "__main__":
+    model = VisionModel("Qwen/Qwen2.5-VL-3B-Instruct-AWQ")
+    model.manual_load()
+    res = model.inference(
+        sys_prompt="hello",
+        user_prompt="respon wassap beigin",
+    )
+    print(res)
+    model.manual_unload()

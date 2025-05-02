@@ -6,7 +6,6 @@ import jax.numpy as jnp
 from action.base import Action, ActionInterface
 from models.qwen_vl_model import Qwen2_5VLModel
 
-
 class QwenVLActionModel(ActionInterface, Qwen2_5VLModel):
     """
     ActionModel implentation for QwenVL based models. It also supports derivatives such as OSAtlas

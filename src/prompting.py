@@ -4,12 +4,15 @@ from planner.base import Plan
 from planner.qwen_planner import QwenVLPlanner
 from prompts.action_prompts import SYS_PROMPT_MID as MIDDLEMAN
 from prompts.planner_prompts import SYS_PROMPT_COT as PLANNER_COT
-from utils.logging_utils import setup_logger, log_exception, log_function_entry_exit
+from utils.logging_utils import setup_logger, log_exception, log_function_entry_exit, LoggedException
 
 from PIL import Image
+import torch
 import sys
 import logging
 import json
+
+import argparse
 
 # Initialize logger
 logger = setup_logger(__name__)
@@ -40,7 +43,8 @@ def take_action(
     logger.debug(f"Current history state: {len(history.actions)} actions performed")
 
     try:
-        middle_model = QwenVLActionModel("Qwen/Qwen2.5-VL-3B-Instruct-AWQ")
+        middle_model = QwenVLActionModel("Qwen/Qwen2.5-VL-3B-Instruct")
+        middle_model.manual_load()
         logger.debug("Initialized QwenVLActionModel")
 
         prompt = f"""
@@ -87,6 +91,10 @@ def take_action(
         logger.info(f"Grounded action to coordinates: {grounding.coords}")
         history.append(grounding, ActionResult.PENDING)
         logger.debug("Added action to history with PENDING status")
+
+        middle_model.manual_unload()
+        del middle_model
+        torch.cuda.empty_cache()
         
     except Exception as e:
         log_exception(logger, e, {
@@ -95,7 +103,7 @@ def take_action(
             "history_length": len(history.actions) if history else 0
         })
         logger.error(f"Failed to execute subtask: {subtask}")
-        raise
+        raise LoggedException()
 
 
 @log_function_entry_exit(logger)
@@ -119,7 +127,8 @@ def plan_task(
     
     try:
         # This prompt now resembles a process description
-        planner = QwenVLPlanner("Qwen/Qwen2.5-VL-3B-Instruct-AWQ")
+        planner = QwenVLPlanner("Qwen/Qwen2.5-VL-3B-Instruct")
+        planner.manual_load()
         logger.debug("Initialized QwenVLPlanner")
 
         prompt = f"""
@@ -140,6 +149,10 @@ def plan_task(
         logger.info(f"Generated plan with {len(plan.steps)} steps")
         logger.debug(f"Plan steps: {json.dumps(plan.steps, indent=2)}")
         
+        planner.manual_unload()
+        del planner
+        torch.cuda.empty_cache()
+        
         return plan
     
     except Exception as e:
@@ -149,10 +162,23 @@ def plan_task(
             "task_description_length": len(task_description) if task_description else 0
         })
         logger.error(f"Failed to plan task: {task}")
-        raise
+        raise LoggedException()
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Task automation script")
+    parser.add_argument("--debug", action="store_true", help="Enable debug logging")
+    parser.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+                      default="INFO", help="Set logging level")
+    return parser.parse_args()
 
 if __name__ == "__main__":
+    args = parse_args()
+    
+    if args.debug:
+        logging.getLogger().setLevel(logging.DEBUG)
+    else:
+        logging.getLogger().setLevel(getattr(logging, args.log_level))
+    
     try:
         logger.info("Starting application")
         
@@ -209,6 +235,9 @@ if __name__ == "__main__":
         print("\n-----------------------\n", history)
         logger.info("Application completed successfully")
     
+    except LoggedException:
+        logger.error("Application terminated due to an error in the task execution")
+        sys.exit(1)
     except Exception as e:
         log_exception(logger, e)
         logger.critical("Application terminated with an unhandled exception")

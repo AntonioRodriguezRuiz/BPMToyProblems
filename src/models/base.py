@@ -5,7 +5,6 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 import torch
 from langchain.callbacks.manager import CallbackManagerForLLMRun
 from langchain.llms.base import LLM
-from utils.logging_utils import setup_logger, log_exception
 
 
 class ModelInterface(LLM, ABC):
@@ -28,9 +27,6 @@ class ModelInterface(LLM, ABC):
         self._loaded: bool = False
         self._loaded_model: Optional[Any] = None
         self._loaded_processor: Optional[Any] = None
-        # Initialize logger for the class
-        self.logger = setup_logger(f"{self.__class__.__module__}.{self.__class__.__name__}")
-        self.logger.debug(f"Initialized {self.__class__.__name__} instance")
 
     @property
     def _llm_type(self) -> str:
@@ -56,26 +52,13 @@ class ModelInterface(LLM, ABC):
 
     def manual_load(self) -> None:
         if not self._loaded:
-            self.logger.info(f"Manually loading model: {self.model_name}")
-            try:
-                self._loaded_model, self._loaded_processor = self.load_model()
-                self._loaded = True
-                self.logger.info(f"Model loaded successfully: {self.model_name}")
-            except Exception as e:
-                log_exception(self.logger, e, {"model_name": self.model_name})
-                self.logger.error(f"Failed to load model: {self.model_name}")
-                raise
+            self._loaded_model, self._loaded_processor = self.load_model()
+            self._loaded = True
 
     def manual_unload(self) -> None:
         if self._loaded:
-            self.logger.info(f"Manually unloading model: {self.model_name}")
-            try:
-                self.unload(self._loaded_model, self._loaded_processor)
-                self._loaded = False
-                self.logger.info(f"Model unloaded successfully: {self.model_name}")
-            except Exception as e:
-                log_exception(self.logger, e, {"model_name": self.model_name})
-                self.logger.warning(f"Error during model unloading: {self.model_name}")
+            self.unload(self._loaded_model, self._loaded_processor)
+            self._loaded = False
 
     @abstractmethod
     def _call(
@@ -121,15 +104,10 @@ class ModelInterface(LLM, ABC):
         Args:
             *args (Any): The items to unload.
         """
-        try:
-            for arg in args:
-                del arg
-            gc.collect()
-            torch.cuda.empty_cache()
-            self.logger.debug("Memory cleaned up and CUDA cache emptied")
-        except Exception as e:
-            log_exception(self.logger, e)
-            self.logger.warning("Failed to clean up memory properly")
+        for arg in args:
+            del arg
+        gc.collect()
+        torch.cuda.empty_cache()
 
     def __call__(
         self, prompt, stop=None, callbacks=None, *, tags=None, metadata=None, **kwargs
@@ -148,23 +126,12 @@ class ModelInterface(LLM, ABC):
         Returns:
             str: The model output as a string.
         """
-        self.logger.debug(f"Model call with prompt length: {len(prompt)}")
-        try:
-            result = self._call(
-                prompt=prompt,
-                stop=stop,
-                callbacks=callbacks,
-                tags=tags,
-                metadata=metadata,
-                **kwargs,
-            )
-            self.logger.debug(f"Model response generated (length: {len(result)})")
-            return result
-        except Exception as e:
-            log_exception(self.logger, e, {
-                "prompt_length": len(prompt),
-                "model_name": self.model_name,
-                "kwargs": str(kwargs.keys()),
-            })
-            self.logger.error(f"Model call failed: {self.model_name}")
-            raise
+        result = self._call(
+            prompt=prompt,
+            stop=stop,
+            callbacks=callbacks,
+            tags=tags,
+            metadata=metadata,
+            **kwargs,
+        )
+        return result
