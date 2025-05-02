@@ -4,6 +4,9 @@ from models.vision_model import VisionModel
 from models.intern_vl_model import InternVLModel
 from models.nvl_model import NVLModel
 from models.qwen_vl_model import QwenVLModel, Qwen2_5VLModel
+from models.utils import (
+    load_image,
+)
 
 __all__ = [
     "ModelInterface",
@@ -13,4 +16,5 @@ __all__ = [
     "NVLModel",
     "QwenVLModel",
     "Qwen2_5VLModel",
+    "load_image",
 ]
