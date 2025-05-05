@@ -206,7 +206,7 @@ class VisionModel(ModelInterface):
         """
         assert isinstance(prompt, str), "prompt must be a string"
         assert stop is None or isinstance(stop, list), "stop must be None or a list"
-        max_tokens: int = kwargs.pop("max_tokens", 512)
+        max_tokens: int = kwargs.pop("max_tokens", 2048)
         sys_prompt: str = kwargs.pop("sys_prompt", "")
 
         if self.loaded:

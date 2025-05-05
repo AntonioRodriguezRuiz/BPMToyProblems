@@ -10,8 +10,41 @@ dependencies = [
     "jax>=0.6.0",
     "langchain>=0.3.24",
     "openai>=1.76.2",
+    "polars>=1.29.0",
     "qwen-vl-utils>=0.0.11",
     "torch>=2.7.0",
     "torchvision>=0.22.0",
-    "transformers>=4.51.3",
+    "transformers>=4.50.0",
+]
+
+[tool.uv.sources]
+torch = [
+  { index = "torch-gpu", marker = "platform_system != 'darwin'"},
+]
+torchvision = [
+  { index = "torch-gpu", marker = "platform_system != 'darwin'"},
+]
+markupsafe = [
+  { index = "simple"},
+]
+transformers = { git = "https://github.com/huggingface/transformers.git", rev = "8ee50537fe7613b87881cd043a85971c85e99519" }
+
+[tool.uv]
+index-strategy = 'unsafe-best-match'
+extra-index-url = [
+  'https://pypi.org/simple',
+  'https://download.pytorch.org/whl/cu118',
+]
+
+[[tool.uv.index]]
+name = "simple"
+url = "https://pypi.org/simple"
+
+[[tool.uv.index]]
+name = "torch-gpu"
+url = "https://download.pytorch.org/whl/cu118"
+
+[dependency-groups]
+dev = [
+    "debugpy>=1.8.14",
 ]
