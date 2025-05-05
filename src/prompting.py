@@ -2,7 +2,7 @@ from action.base import Action, ActionResult, History
 from action.qwen_action import AtlasActionmodel, QwenVLActionModel
 from planner.base import Plan
 from planner.qwen_planner import QwenVLPlanner
-from prompts.action_prompts import SYS_PROMPT_MID as MIDDLEMAN
+from prompts.action_prompts import SYS_PROMPT_ATLASPRO
 from prompts.planner_prompts import SYS_PROMPT_COT as PLANNER_COT
 from utils.logging_utils import setup_logger, log_exception, log_function_entry_exit, LoggedException
 
@@ -43,7 +43,7 @@ def take_action(
     logger.debug(f"Current history state: {len(history.actions)} actions performed")
 
     try:
-        middle_model = QwenVLActionModel("Qwen/Qwen2.5-VL-3B-Instruct")
+        middle_model = QwenVLActionModel("Qwen/Qwen2.5-VL-7B-Instruct")
         middle_model.manual_load()
         logger.debug("Initialized QwenVLActionModel")
 
@@ -68,7 +68,7 @@ def take_action(
         
         logger.debug("Generating action with middle model")
         action: Action = middle_model.action(
-            MIDDLEMAN,
+            SYS_PROMPT_ATLASPRO,
             prompt,
             image=image,
         )
@@ -127,7 +127,7 @@ def plan_task(
     
     try:
         # This prompt now resembles a process description
-        planner = QwenVLPlanner("Qwen/Qwen2.5-VL-3B-Instruct")
+        planner = QwenVLPlanner("Qwen/Qwen2.5-VL-7B-Instruct")
         planner.manual_load()
         logger.debug("Initialized QwenVLPlanner")
 
