@@ -1,4 +1,5 @@
 import re
+import json
 
 from models.qwen_vl_model import Qwen2_5VLModel
 from planner.base import Plan, PlannerInterface
@@ -33,7 +34,55 @@ class QwenVLPlanner(PlannerInterface, Qwen2_5VLModel):
 
         return self.parse_plan(messages, processed_output_text)
 
-    def parse_plan(self, prompt: list[dict[str, str]], plan: str) -> Plan:
+    def parse_plan(self, prompt: list[dict[str, str]], plan_text: str) -> Plan:
+        """
+        Parse JSON-formatted plan response
+        
+        :param prompt: The original prompt given to the model
+        :param plan_text: The model's JSON response
+        :return: A Plan object with parsed steps and reasoning
+        """
+        # Extract JSON content from the response
+        json_pattern = r"```json\s*(.*?)\s*```"
+        json_match = re.search(json_pattern, plan_text, re.DOTALL)
+        
+        if json_match:
+            json_str = json_match.group(1)
+        else:
+            # If not found between code blocks, try to find a JSON object directly
+            json_pattern = r"\{.*?\}"
+            json_match = re.search(json_pattern, plan_text, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(0)
+            else:
+                self.logger.error("No JSON content found in the plan response")
+                # Fall back to the old regex pattern for backward compatibility
+                return self._parse_plan_with_regex(prompt, plan_text)
+        
+        try:
+            plan_data = json.loads(json_str)
+            
+            # Extract steps and reasoning from the JSON
+            steps = plan_data.get("steps", [])
+            reasoning = plan_data.get("reasoning", {})
+            
+            if not steps:
+                self.logger.error("No steps found in the JSON plan")
+                # Fall back to the old regex pattern for backward compatibility
+                return self._parse_plan_with_regex(prompt, plan_text)
+            
+            return Plan(prompt, plan_text, steps, reasoning=reasoning)
+            
+        except json.JSONDecodeError as e:
+            self.logger.error(f"Error decoding JSON from plan: {e}")
+            # Fall back to the old regex pattern for backward compatibility
+            return self._parse_plan_with_regex(prompt, plan_text)
+    
+    def _parse_plan_with_regex(self, prompt: list[dict[str, str]], plan: str) -> Plan:
+        """
+        Legacy method to parse plan using regex patterns for backward compatibility
+        """
+        self.logger.warning("Using regex fallback to parse plan output")
         reasoning_pattern = r"<\|reasoning_begin\|>(.*?)<\|reasoning_end\|>"
         steps_pattern = r"<\|steps_begin\|>(.*?)<\|steps_end\|>"
 
