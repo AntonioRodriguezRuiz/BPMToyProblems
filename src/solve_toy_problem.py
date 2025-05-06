@@ -18,11 +18,11 @@ import logging
 import json
 import re
 
-from action.base import Action, ActionResult, History
-from action.qwen_action import QwenVLActionModel
-from planner.base import Plan
-from planner.qwen_planner import QwenVLPlanner
-from utils.logging_utils import setup_logger, log_exception, log_function_entry_exit, LoggedException
+from action import Action, ActionResult, History, QwenVLActionModel
+from planner import Plan, QwenVLPlanner
+from models import TextModel
+from utils.logging_utils import setup_logger, log_exception, log_function_entry_exit, LoggedException, log_variable
+from prompts import RECOVERY_PLANNER_PROMPT, RECOVERY_ACTION_PROMPT, RECOVERY_PLAN_VALIDATOR_PROMPT
 
 # Initialize logger
 logger = setup_logger(__name__)
@@ -33,6 +33,19 @@ problems = {
         "log_path": "resources/ToyProblem1/log.csv",
         "last_successful_action": 2,
         "robot_last_screenshot": "resources/ToyProblem1/images_new/1_2.png",
+        "expected_solution": [
+            ("Click on continue button", [(730, 350), (730, 404), (872, 350), (872, 404)]),
+            ("Click on password input field", [(730, 350), (730, 404), (1180, 350), (1180, 404)]),
+            ("Type in password", None),
+            ("Click on login button", [(730,427), (730, 484), (854, 427), (854,484)])
+        ],
+        "expected_screenshots": [
+            "resources/ToyProblem1/images_new/1_2.png", # On first click
+            "resources/ToyProblem1/images_new/1_2_5.png", # On first click
+            "resources/ToyProblem1/images_new/1_2_5.png", # On second click
+            "resources/ToyProblem1/images_new/1_2_5_2.png", # After input
+            "resources/ToyProblem1/images_new/1_2_5_2.png", # On last click
+        ]
     },
     2: {
         "id": 2,
@@ -43,7 +56,7 @@ problems = {
 }
 
 class Problem:
-    def __init__(self, id, log_path, robot_trace, last_successful_action_idx, last_successful_action, robot_last_screenshot, expected_action):
+    def __init__(self, id, log_path, robot_trace, last_successful_action_idx, last_successful_action, robot_last_screenshot, expected_action, expected_solution):
         self.id = id
         self.log_path = log_path
         self.robot_trace = robot_trace
@@ -51,6 +64,7 @@ class Problem:
         self.last_successful_action = last_successful_action # Semantic description
         self.robot_last_screenshot = robot_last_screenshot
         self.expected_action = expected_action # Semantic description
+        self.expected_solution: list[tuple[None | str | list[tuple[int]]]] = expected_solution # List of expected actions to be performed
 
     def __repr__(self):
         return f"Problem(id={self.id}, log_path={self.log_path}, last_successful_action={self.last_successful_action})"
@@ -75,91 +89,11 @@ def get_problem(problem_id):
         last_successful_action_idx=problems[problem_id]["last_successful_action"],
         last_successful_action=last_successful_action,
         robot_last_screenshot=problems[problem_id]["robot_last_screenshot"],
-        expected_action=expected_action
+        expected_action=expected_action,
+        expected_solution=problems[problem_id].get("expected_solution", []),
     )
     
     return problem
-
-# Custom system prompts for the RPA recovery scenario
-RECOVERY_PLANNER_PROMPT = """
-You are a specialized AI planner designed to recover robotic process automation (RPA) workflows that have failed.
-Your role is to analyze the current state, understand what went wrong, and create a plan to get the process back on track.
-
-You will be given:
-1. The last successful action performed by the robot
-2. The action that was expected to be performed but failed
-3. The current screenshot of the application
-4. Information about the overall process
-
-Follow these guidelines:
-1. Carefully analyze the last successful action and the expected action to understand where the process broke.
-2. Examine the provided screenshot to assess the current UI state.
-3. Determine what might have caused the failure (e.g., UI changes, timing issues, unexpected popups).
-4. Create a precise step-by-step plan to recover the process and continue from where it left off.
-5. The goal is to get the process back to a state where the robot can continue its automation.
-
-Your response should be a JSON object with the following structure:
-```json
-{
-  "reasoning": {
-    "failure_analysis": "Analysis of what may have caused the failure",
-    "ui_state": "Description of the current UI state and how it differs from expected",
-    "recovery_approach": "General approach for recovery",
-    "challenges": "Potential challenges or alternative approaches"
-  },
-  "steps": ["Step 1", "Step 2", "Step 3", "..."]
-}
-```
-
-Your reasoning should include:
-1. Analysis of what may have caused the failure
-2. How the current UI state differs from what was expected
-3. What steps are needed to recover and continue the process
-4. Any potential challenges or alternative approaches
-
-Remember that your plan will be executed by an action module capable of interacting with UI elements, so be specific about what elements to interact with and how.
-"""
-
-RECOVERY_ACTION_PROMPT = """
-You are an AI designed to execute recovery actions for robotic process automation (RPA) workflows that have failed.
-Your goal is to perform the specific actions needed to get the process back on track so the robot can continue its work.
-
-You will be provided with:
-1. A high-level recovery plan created by a planning AI
-2. A history of past actions (if any have been taken during recovery)
-3. A screenshot showing the current state of the application
-4. Details about the last successful robot action and the action that was expected but failed
-
-Your task is to determine the exact concrete action required to execute the current step in the recovery plan.
-Focus on one atomic action based on the UI elements visible in the screenshot.
-
-Guidelines:
-1. Carefully examine the screenshot to identify UI elements relevant to the current step
-2. Ground your action on observable elements in the UI
-3. Provide clear execution details (clicks, keyboard input, etc.)
-4. If an element isn't visible or the step cannot be completed, explain why and suggest alternatives
-
-Your response should be a JSON object with the following structure:
-```json
-{
-  "context_analysis": "Detailed explanation of your reasoning for identifying the action",
-  "action": {
-    "type": "LeftClick|RightClick|Type|Press|Finish|Scroll",
-    "target": "Description of the target element or text to type"
-  }
-}
-```
-
-Possible action types:
-- "LeftClick": Click on a UI element
-- "RightClick": Right click on a UI element
-- "Type": Type text into a field
-- "Press": Press a specific key
-- "Finish": Mark the task as complete
-- "Scroll": Scroll in a specified direction (target should be "UP", "DOWN", "LEFT", or "RIGHT")
-
-Remember that you are specifically trying to recover from a failure point in an RPA process, so focus on getting the workflow back to a state where the robot can continue its normal execution.
-"""
 
 @log_function_entry_exit(logger)
 def plan_recovery(problem, current_screenshot):
@@ -173,7 +107,7 @@ def plan_recovery(problem, current_screenshot):
     logger.info(f"Planning recovery for problem {problem.id}")
     
     try:
-        planner = QwenVLPlanner("Qwen/Qwen2.5-VL-32B-Instruct-AWQ")
+        planner = QwenVLPlanner("Qwen/Qwen2.5-VL-32B-Instruct")
         planner.manual_load()
         logger.debug("Initialized QwenVLPlanner for recovery")
         
@@ -202,17 +136,34 @@ def plan_recovery(problem, current_screenshot):
             image=current_screenshot
         )
 
-        # TODO: Use LLMs to validate the plan against a pre-established set of expected solutions for the problem
-        
         logger.info(f"Generated recovery plan with {len(plan.steps)} steps")
         logger.debug(f"Recovery plan steps: {json.dumps(plan.steps, indent=2)}")
+        
+        # Log the generated plan to variables log file
+        log_variable("recovery_plan", {
+            "problem_id": problem.id,
+            "steps": plan.steps,
+            "reasoning": plan.reasoning
+        }, {"prompt": prompt})
         
         planner.manual_unload()
         del planner
         torch.cuda.empty_cache()
+
+        # Validate the plan against expected solutions
+        score = validate_recovery_plan(problem, plan.steps, current_screenshot)
+        if score != "Pass":
+            logger.warning(f"Recovery plan validation failed with score: {score}")
+            # Log the validation failure
+            log_variable("plan_validation_failure", {
+                "problem_id": problem.id, 
+                "score": score,
+                "plan": plan.steps
+            }, {"expected_solution": problem.expected_solution})
+            raise LoggedException("Recovery plan validation failed")
         
         return plan
-        
+
     except Exception as e:
         log_exception(logger, e, {
             "problem_id": problem.id,
@@ -221,6 +172,68 @@ def plan_recovery(problem, current_screenshot):
         })
         logger.error(f"Failed to plan recovery for problem {problem.id}")
         raise LoggedException()
+
+@log_function_entry_exit(logger)
+def validate_recovery_plan(problem, plan, current_screenshot):
+    """
+    Validates a recovery plan against the expected solution for a problem
+    
+    :param problem: The problem object containing information about expected solutions
+    :param plan: The generated recovery plan to validate
+    :param current_screenshot: Current screenshot of the application
+    :return: Validation score (Pass/Fail/Partial)
+    """
+    logger.info(f"Validating recovery plan for problem {problem.id}")
+    
+    validator = TextModel("Qwen/Qwen2.5-32B-Instruct")
+    expected_steps = list(map(lambda x: x[0], problem.expected_solution))
+    prompt = f"""
+    **Plan Validation Task**: Validate the recovery plan for a broken RPA process.
+    **Last Successful Action**: {problem.last_successful_action}
+    **Failed Action (Objective)**: {problem.expected_action}
+    **Recovery Plan**: {json.dumps(plan, indent=2)}
+    **Expected Solution**: {json.dumps(expected_steps, indent=2)}
+    """
+
+    validator.manual_load()
+    validation_result = validator(
+        prompt,
+        sys_prompt=RECOVERY_PLAN_VALIDATOR_PROMPT,
+        image=current_screenshot
+    )
+    logger.info(f"Generated plan validation for problem {problem.id}")
+    validator.manual_unload()
+    del validator
+    torch.cuda.empty_cache()
+
+    # The result is wthin a JSON object in the response
+    json_pattern = r"```json\s*(.*?)\s*```"
+    json_match = re.search(json_pattern, validation_result, re.DOTALL)
+    
+    if json_match:
+        json_str = json_match.group(1)
+    else:
+        # If not found between code blocks, try to find a JSON object directly
+        json_pattern = r"\{.*?\}"
+        json_match = re.search(json_pattern, validation_result, re.DOTALL)
+        if json_match:
+            json_str = json_match.roup(0)
+        else:
+            logger.error("No JSON content found in the validator response")
+    
+    try:
+        plan_data = json.loads(json_str)
+        log_variable("plan_validation", {
+            "problem_id": problem.id,
+            "plan": plan,
+            "validation_result": plan_data
+        }, {"expected_solution": expected_steps})
+        score = plan_data.get("score", {})
+       
+    except json.JSONDecodeError as e:
+        logger.error(f"Error decoding JSON from validation: {e}")
+    
+    return score
 
 @log_function_entry_exit(logger)
 def execute_recovery_step(step, history, current_screenshot, problem, plan):
@@ -271,6 +284,17 @@ def execute_recovery_step(step, history, current_screenshot, problem, plan):
         
         logger.info(f"Generated action: {action.action} with target: {action.action_target}")
         
+        # Log the action to the variables log file
+        log_variable("action_execution", {
+            "step": step,
+            "action_type": action.action,
+            "action_target": action.action_target,
+            "problem_id": problem.id
+        }, {
+            "plan_context": plan.steps,
+            "history_length": len(history.actions) if history else 0
+        })
+        
         # TODO: Check coordinates for actions that involve clicking.
         result = ActionResult.SUCCESS
         
@@ -285,6 +309,17 @@ def execute_recovery_step(step, history, current_screenshot, problem, plan):
         return result
         
     except Exception as e:
+        # Log the failed action to variables log file
+        log_variable("action_execution_failure", {
+            "step": step,
+            "problem_id": problem.id,
+            "error": str(e),
+            "error_type": type(e).__name__
+        }, {
+            "history_length": len(history.actions) if history else 0,
+            "plan_context": plan.steps
+        })
+        
         log_exception(logger, e, {
             "step": step,
             "problem_id": problem.id,
@@ -317,6 +352,13 @@ def solve_problem(problem_id, max_retry_attempts=3):
             logger.debug("Screenshot loaded successfully")
         except Exception as e:
             log_exception(logger, e, {"image_path": image_path})
+            # Log the validation failure for screenshot loading
+            log_variable("validation_failure", {
+                "component": "screenshot_loading",
+                "problem_id": problem_id,
+                "image_path": problem.robot_last_screenshot,
+                "error": str(e)
+            })
             logger.error("Failed to load screenshot. Make sure the path is correct.")
             return False
         
@@ -349,6 +391,17 @@ def solve_problem(problem_id, max_retry_attempts=3):
                 
                 if result != ActionResult.SUCCESS:
                     logger.warning(f"Step {i+1} failed with result {result}")
+                    # Log the step execution failure
+                    log_variable("step_validation_failure", {
+                        "problem_id": problem_id,
+                        "attempt": attempt + 1,
+                        "step_number": i + 1,
+                        "step": step,
+                        "result": str(result)
+                    }, {
+                        "plan_context": plan.steps,
+                        "history": history.get_formatted_history()
+                    })
                     success = False
                     break
                 
@@ -368,17 +421,56 @@ def solve_problem(problem_id, max_retry_attempts=3):
                         logger.debug(f"Updated screenshot to {next_image_path}")
                     except Exception as e:
                         log_exception(logger, e, {"image_path": next_image_path})
+                        # Log screenshot transition failure
+                        log_variable("screenshot_transition_failure", {
+                            "problem_id": problem_id,
+                            "attempt": attempt + 1, 
+                            "step_number": i + 1,
+                            "current_image": problem.robot_last_screenshot,
+                            "next_image_path": next_image_path,
+                            "error": str(e)
+                        })
                         logger.warning(f"Could not load next screenshot {next_image_path}, continuing with current")
+                        raise LoggedException()
             
             if success:
+                # Log successful recovery
+                log_variable("recovery_success", {
+                    "problem_id": problem_id,
+                    "attempts_needed": attempt + 1,
+                    "steps_executed": len(plan.steps),
+                    "total_actions": len(history.actions)
+                }, {
+                    "plan": plan.steps,
+                    "reasoning": plan.reasoning
+                })
                 logger.info("Recovery successful!")
                 return True
             
             # If we get here, recovery failed - try again with updated plan
             logger.warning(f"Recovery attempt {attempt + 1} failed, retrying")
+            # Log failed recovery attempt
+            log_variable("recovery_attempt_failure", {
+                "problem_id": problem_id,
+                "attempt_number": attempt + 1,
+                "steps_executed": i + 1,
+                "total_actions": len(history.actions)
+            }, {
+                "plan": plan.steps,
+                "history": history.get_formatted_history()
+            })
             plan = plan_recovery(problem, current_screenshot)
             attempt += 1
         
+        # Log maximum retries reached
+        log_variable("max_retries_reached", {
+            "problem_id": problem_id,
+            "max_retry_attempts": max_retry_attempts,
+            "total_actions": len(history.actions)
+        }, {
+            "last_plan": plan.steps,
+            "history": history.get_formatted_history()
+        })
         logger.error(f"Failed to recover after {max_retry_attempts} attempts")
         return False
         
