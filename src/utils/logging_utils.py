@@ -6,12 +6,35 @@ from datetime import datetime
 import traceback
 import json
 import pprint as pp
+from colorama import Fore, Back, Style, init
+
+# Initialize colorama
+init(autoreset=True)
 
 # Define custom exception to prevent multiple error logging
 class LoggedException(Exception):
     """Custom exception to prevent multiple error logging."""
     def __init__(self):
         super().__init__()
+
+# Define color mapping for different log levels
+LOG_COLORS = {
+    logging.DEBUG: Fore.CYAN,
+    logging.INFO: Fore.GREEN,
+    logging.WARNING: Fore.YELLOW,
+    logging.ERROR: Fore.RED,
+    logging.CRITICAL: Fore.RED + Back.WHITE + Style.BRIGHT
+}
+
+# Custom formatter with colors
+class ColoredFormatter(logging.Formatter):
+    """Custom formatter to add colors to log messages in console output"""
+    def format(self, record):
+        levelno = record.levelno
+        if levelno in LOG_COLORS:
+            record.levelname = f"{LOG_COLORS[levelno]}{record.levelname}{Style.RESET_ALL}"
+            record.msg = f"{LOG_COLORS[levelno]}{record.msg}{Style.RESET_ALL}"
+        return super().format(record)
 
 # Configure logger
 def setup_logger(name, log_level=logging.INFO, log_file=None):
@@ -33,18 +56,24 @@ def setup_logger(name, log_level=logging.INFO, log_file=None):
         log_file = os.path.join("logs", f"{timestamp}.log")
     
     # Create formatter with detailed information
-    formatter = logging.Formatter(
+    file_formatter = logging.Formatter(
+        '%(asctime)s - [%(name)s:%(lineno)d] - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    
+    # Create colored formatter for console output
+    console_formatter = ColoredFormatter(
         '%(asctime)s - [%(name)s:%(lineno)d] - %(levelname)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
     
     # Configure file handler
     file_handler = logging.FileHandler(log_file, encoding='utf-8')
-    file_handler.setFormatter(formatter)
+    file_handler.setFormatter(file_formatter)
     
-    # Configure console handler with the same format
+    # Configure console handler with colored format
     console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(formatter)
+    console_handler.setFormatter(console_formatter)
     
     # Get or create logger
     logger = logging.getLogger(name)
@@ -59,6 +88,52 @@ def setup_logger(name, log_level=logging.INFO, log_file=None):
     logger.addHandler(console_handler)
     
     return logger
+
+def log_variable(variable_name, variable_value, additional_info=None):
+    """
+    Log a variable value to a dedicated variables log file with execution timestamp
+    
+    Args:
+        variable_name: Name of the variable to log
+        variable_value: Value of the variable to log
+        additional_info: Optional additional context information
+        
+    Returns:
+        Path to the variables log file
+    """
+    # Create logs directory if it doesn't exist
+    os.makedirs("logs", exist_ok=True)
+    
+    # Generate execution timestamp if not already created
+    if not hasattr(log_variable, "execution_timestamp"):
+        log_variable.execution_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # Create variables log file with execution timestamp
+    var_log_file = os.path.join("logs", f"variables_{log_variable.execution_timestamp}.log")
+    
+    # Format the variable value for logging
+    if isinstance(variable_value, (dict, list, tuple, set)):
+        formatted_value = pp.pformat(variable_value, indent=2)
+    else:
+        formatted_value = str(variable_value)
+    
+    # Prepare log entry
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    log_entry = f"[{timestamp}] {variable_name} = {formatted_value}"
+    
+    # Add additional info if provided
+    if additional_info:
+        if isinstance(additional_info, dict):
+            additional_info_str = pp.pformat(additional_info, indent=2)
+        else:
+            additional_info_str = str(additional_info)
+        log_entry += f"\nContext: {additional_info_str}"
+    
+    # Append to log file
+    with open(var_log_file, 'a', encoding='utf-8') as f:
+        f.write(log_entry + "\n\n" + "-" * 80 + "\n\n")
+    
+    return var_log_file
 
 def log_exception(logger, e, context=None):
     """
