@@ -1,5 +1,5 @@
 from action.base import Action, ActionResult, History
-from action.qwen_action import AtlasActionmodel, QwenVLActionModel
+from action.qwen_action import AtlasActionModel, QwenVLActionModel
 from planner.base import Plan
 from planner.qwen_planner import QwenVLPlanner
 from prompts.action_prompts import SYS_PROMPT_ATLASPRO
@@ -82,7 +82,7 @@ def take_action(
         )
 
         logger.debug("Initializing Atlas action model for grounding")
-        action_model = AtlasActionmodel("OS-Copilot/OS-Atlas-Base-4B")
+        action_model = AtlasActionModel("OS-Copilot/OS-Atlas-Base-4B")
 
         grounding_prompt = f'In this UI screenshot, what is the position of the element corresponding to the command "{action.action_target}" (with bbox)?'
         logger.debug(f"Grounding with prompt: {grounding_prompt}")

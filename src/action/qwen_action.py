@@ -18,7 +18,7 @@ class QwenVLActionModel(ActionInterface, Qwen2_5VLModel):
     def __init__(self, model_name: str, *args, **kwargs):
         super().__init__(model_name, *args, **kwargs)
 
-    def action(self, sys_prompt, user_prompt, *args, **kwargs):
+    def action(self, sys_prompt, user_prompt, *args, **kwargs) -> Action:
         # Call the inference method directly instead of _call
         messages = []
         if sys_prompt:
@@ -131,7 +131,7 @@ class QwenVLActionModel(ActionInterface, Qwen2_5VLModel):
         )
 
 
-class AtlasActionmodel(QwenVLActionModel):
+class AtlasActionModel(QwenVLActionModel):
     """
     ActionModel implementation for Atlas models.
     """
