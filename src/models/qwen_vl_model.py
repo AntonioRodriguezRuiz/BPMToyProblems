@@ -9,6 +9,7 @@ from transformers import (
 
 from models.vision_model import VisionModel
 
+
 class QwenVLModel(VisionModel):
     """
     Implementation of the QwenVL model interface.
@@ -90,6 +91,7 @@ class Qwen2_5VLModel(QwenVLModel):
         )
         processor = AutoProcessor.from_pretrained(self.model_name)
         return model, processor
+
 
 if __name__ == "__main__":
     model = QwenVLModel("Qwen/Qwen2.5-VL-3B-Instruct-AWQ")

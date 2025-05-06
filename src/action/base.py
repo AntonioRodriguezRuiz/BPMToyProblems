@@ -83,7 +83,12 @@ class History:
         return self.results
 
     def __str__(self):
-        return "\n".join([f"Executed {action} with result {result}" for action, result in self.results])
+        return "\n".join(
+            [
+                f"Executed {action} with result {result}"
+                for action, result in self.results
+            ]
+        )
 
     @property
     def last_result(self):

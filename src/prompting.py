@@ -4,7 +4,12 @@ from planner.base import Plan
 from planner.qwen_planner import QwenVLPlanner
 from prompts.action_prompts import SYS_PROMPT_ATLASPRO
 from prompts.planner_prompts import SYS_PROMPT_COT as PLANNER_COT
-from utils.logging_utils import setup_logger, log_exception, log_function_entry_exit, LoggedException
+from utils.logging_utils import (
+    setup_logger,
+    log_exception,
+    log_function_entry_exit,
+    LoggedException,
+)
 
 from PIL import Image
 import torch
@@ -65,21 +70,23 @@ def take_action(
 
         **current subtask**: {subtask}
         """
-        
+
         logger.debug("Generating action with middle model")
         action: Action = middle_model.action(
             SYS_PROMPT_ATLASPRO,
             prompt,
             image=image,
         )
-        logger.info(f"Generated action: {action.action} with target: {action.action_target}")
+        logger.info(
+            f"Generated action: {action.action} with target: {action.action_target}"
+        )
 
         logger.debug("Initializing Atlas action model for grounding")
         action_model = AtlasActionmodel("OS-Copilot/OS-Atlas-Base-4B")
-        
+
         grounding_prompt = f'In this UI screenshot, what is the position of the element corresponding to the command "{action.action_target}" (with bbox)?'
         logger.debug(f"Grounding with prompt: {grounding_prompt}")
-        
+
         grounding: Action = action_model.action(
             None,
             grounding_prompt,
@@ -87,7 +94,7 @@ def take_action(
         )
         grounding.action = action.action
         grounding.action_target = action.action_target
-        
+
         logger.info(f"Grounded action to coordinates: {grounding.coords}")
         history.append(grounding, ActionResult.PENDING)
         logger.debug("Added action to history with PENDING status")
@@ -95,13 +102,17 @@ def take_action(
         middle_model.manual_unload()
         del middle_model
         torch.cuda.empty_cache()
-        
+
     except Exception as e:
-        log_exception(logger, e, {
-            "subtask": subtask,
-            "task": task,
-            "history_length": len(history.actions) if history else 0
-        })
+        log_exception(
+            logger,
+            e,
+            {
+                "subtask": subtask,
+                "task": task,
+                "history_length": len(history.actions) if history else 0,
+            },
+        )
         logger.error(f"Failed to execute subtask: {subtask}")
         raise LoggedException()
 
@@ -124,7 +135,7 @@ def plan_task(
     @returns plan: Plan object
     """
     logger.info(f"Planning task: {task}")
-    
+
     try:
         # This prompt now resembles a process description
         planner = QwenVLPlanner("Qwen/Qwen2.5-VL-7B-Instruct")
@@ -139,7 +150,7 @@ def plan_task(
 
         logger.debug(f"Generated planning prompt with task: {task}")
         formatted_sys_prompt = PLANNER_COT.format(context=context)
-        
+
         plan: Plan = planner.plan(
             formatted_sys_prompt,
             prompt,
@@ -148,38 +159,50 @@ def plan_task(
 
         logger.info(f"Generated plan with {len(plan.steps)} steps")
         logger.debug(f"Plan steps: {json.dumps(plan.steps, indent=2)}")
-        
+
         planner.manual_unload()
         del planner
         torch.cuda.empty_cache()
-        
+
         return plan
-    
+
     except Exception as e:
-        log_exception(logger, e, {
-            "task": task,
-            "context_length": len(context) if context else 0,
-            "task_description_length": len(task_description) if task_description else 0
-        })
+        log_exception(
+            logger,
+            e,
+            {
+                "task": task,
+                "context_length": len(context) if context else 0,
+                "task_description_length": len(task_description)
+                if task_description
+                else 0,
+            },
+        )
         logger.error(f"Failed to plan task: {task}")
         raise LoggedException()
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Task automation script")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
-    parser.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
-                      default="INFO", help="Set logging level")
+    parser.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        default="INFO",
+        help="Set logging level",
+    )
     return parser.parse_args()
+
 
 if __name__ == "__main__":
     args = parse_args()
-    
+
     if args.debug:
         logger.setLevel(logging.DEBUG)
-    
+
     try:
         logger.info("Starting application")
-        
+
         task: str = 'Register a client with email "example@email.com" and password "password123"'
         logger.debug(f"Task defined: {task}")
 
@@ -208,7 +231,9 @@ if __name__ == "__main__":
             logger.debug("Image loaded successfully")
         except Exception as e:
             log_exception(logger, e, {"image_path": "./resources/A.png"})
-            logger.error("Failed to load image. Make sure the resources directory exists with the correct image file.")
+            logger.error(
+                "Failed to load image. Make sure the resources directory exists with the correct image file."
+            )
             sys.exit(1)
 
         logger.info("Creating plan")
@@ -232,7 +257,7 @@ if __name__ == "__main__":
 
         print("\n-----------------------\n", history)
         logger.info("Application completed successfully")
-    
+
     except LoggedException:
         logger.error("Application terminated due to an error in the task execution")
         sys.exit(1)

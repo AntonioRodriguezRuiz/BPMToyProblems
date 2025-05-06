@@ -237,6 +237,7 @@ class VisionModel(ModelInterface):
         processor = AutoProcessor.from_pretrained(self.model_name)
         return model, processor
 
+
 if __name__ == "__main__":
     model = VisionModel("Qwen/Qwen2.5-VL-3B-Instruct-AWQ")
     model.manual_load()
