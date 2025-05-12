@@ -10,17 +10,23 @@
 # 2. The agent is unable to solve the problem and raises the error to a human operator
 
 import polars as pl
-import os
 import sys
 from PIL import Image
 import torch
 import logging
 import json
 import re
+from matplotlib import pyplot as plt
 
-from action import Action, ActionResult, History, QwenVLActionModel
+from action import (
+    Action,
+    ActionResult,
+    History,
+    UITarsActionModel,
+    QwenOmniparserActionModel,
+)
 from planner import Plan, QwenVLPlanner
-from models import TextModel
+from models import TextModel, Qwen2_5VLModel
 from utils.logging_utils import (
     setup_logger,
     log_exception,
@@ -29,10 +35,14 @@ from utils.logging_utils import (
     log_variable,
 )
 from prompts import (
+    SYS_PROMPT_MID,
     RECOVERY_PLANNER_PROMPT,
-    RECOVERY_ACTION_PROMPT,
     RECOVERY_PLAN_VALIDATOR_PROMPT,
+    SYS_PROMPT_ATLASPRO,
+    UITARS_GROUNDING,
+    SYS_PROMPT_OMNIPARSER,
 )
+from utils import resize_img
 
 # Initialize logger
 logger = setup_logger(__name__)
@@ -57,9 +67,9 @@ problems = {
         ],
         "expected_screenshots": [
             "resources/ToyProblem1/images_new/1_2.png",  # On first click
-            "resources/ToyProblem1/images_new/1_2_5.png",  # On first click
+            "resources/ToyProblem1/images_new/1_2.png",  # On wait
             "resources/ToyProblem1/images_new/1_2_5.png",  # On second click
-            "resources/ToyProblem1/images_new/1_2_5_2.png",  # After input
+            "resources/ToyProblem1/images_new/1_2_5.png",  # On input
             "resources/ToyProblem1/images_new/1_2_5_2.png",  # On last click
         ],
     },
@@ -83,6 +93,7 @@ class Problem:
         robot_last_screenshot,
         expected_action,
         expected_solution,
+        expected_screenshots,
     ):
         self.id = id
         self.log_path = log_path
@@ -94,6 +105,7 @@ class Problem:
         self.expected_solution: list[tuple[None | str | list[tuple[int]]]] = (
             expected_solution  # List of expected actions to be performed
         )
+        self.expected_screenshots = expected_screenshots
 
     def __repr__(self):
         return f"Problem(id={self.id}, log_path={self.log_path}, last_successful_action={self.last_successful_action})"
@@ -125,6 +137,7 @@ def get_problem(problem_id):
         robot_last_screenshot=problems[problem_id]["robot_last_screenshot"],
         expected_action=expected_action,
         expected_solution=problems[problem_id].get("expected_solution", []),
+        expected_screenshots=problems[problem_id].get("expected_screenshots", []),
     )
 
     return problem
@@ -165,7 +178,9 @@ def plan_recovery(problem, current_screenshot):
         logger.debug(f"Generated recovery planning prompt for problem {problem.id}")
 
         # Get the recovery plan
-        plan = planner.plan(RECOVERY_PLANNER_PROMPT, prompt, image=current_screenshot)
+        plan: Plan = planner.plan(
+            RECOVERY_PLANNER_PROMPT, prompt, image=current_screenshot
+        )
 
         logger.info(f"Generated recovery plan with {len(plan.steps)} steps")
         logger.debug(f"Recovery plan steps: {json.dumps(plan.steps, indent=2)}")
@@ -186,7 +201,9 @@ def plan_recovery(problem, current_screenshot):
         torch.cuda.empty_cache()
 
         # Validate the plan against expected solutions
-        score = validate_recovery_plan(problem, plan.steps, current_screenshot)
+        score, coordinate_mapping = validate_recovery_plan(
+            problem, plan.steps, current_screenshot
+        )
         if score != "Pass":
             logger.warning(f"Recovery plan validation failed with score: {score}")
             # Log the validation failure
@@ -197,7 +214,7 @@ def plan_recovery(problem, current_screenshot):
             )
             raise LoggedException("Recovery plan validation failed")
 
-        return plan
+        return plan, coordinate_mapping
 
     except Exception as e:
         log_exception(
@@ -226,13 +243,13 @@ def validate_recovery_plan(problem, plan, current_screenshot):
     logger.info(f"Validating recovery plan for problem {problem.id}")
 
     validator = TextModel("Qwen/Qwen2.5-32B-Instruct")
-    expected_steps = list(map(lambda x: x[0], problem.expected_solution))
+
     prompt = f"""
     **Plan Validation Task**: Validate the recovery plan for a broken RPA process.
     **Last Successful Action**: {problem.last_successful_action}
     **Failed Action (Objective)**: {problem.expected_action}
     **Recovery Plan**: {json.dumps(plan, indent=2)}
-    **Expected Solution**: {json.dumps(expected_steps, indent=2)}
+    **Expected Solution**: {json.dumps(problem.expected_solution, indent=2)}
     """
 
     validator.manual_load()
@@ -255,31 +272,102 @@ def validate_recovery_plan(problem, plan, current_screenshot):
         json_pattern = r"\{.*?\}"
         json_match = re.search(json_pattern, validation_result, re.DOTALL)
         if json_match:
+            json_str = json_match.group(0)
+        else:
+            logger.error("No JSON content found in the validator response")
+
+    try:
+        logger.debug(f"Validation result JSON: {json_str}")
+        plan_data = json.loads(json_str)
+        log_variable(
+            "plan_validation",
+            {"problem_id": problem.id, "plan": plan, "validation_result": plan_data},
+            {"expected_solution": problem.expected_solution},
+        )
+        score = plan_data.get("score", {})
+        coordinate_mapping = plan_data.get("coordinate_mapping", {})
+
+    except json.JSONDecodeError as e:
+        logger.error(f"Error decoding JSON from validation: {e}")
+        log_variable("validation_result", validation_result)
+
+    return score, coordinate_mapping
+
+
+def infer_step_action(step, history, current_screenshot, problem, plan):
+    """
+    Infers the action type from the step description
+
+    :param step: The current step to infer action for
+    :param history: History of actions taken during recovery
+    :param current_screenshot: The current screenshot of the application
+    :param problem: The problem object
+    :param plan: The recovery plan
+    :return: Action type, target, and command
+    """
+    action_model = Qwen2_5VLModel("Qwen/Qwen2.5-VL-32B-Instruct")
+    action_model.manual_load()
+
+    prompt = f"""
+    **Task**: {problem.robot_trace[0]["ActivityLabel"]}
+    **Plan**: {", ".join(plan.steps)}.
+    **Plan Reasoning**: {plan.reasoning}
+
+    **History**:
+    {history}
+
+    **Last Action**: {history.last_action or problem.last_successful_action}
+    **Result of Last Action**: {ActionResult.SUCCESS}
+    
+    **Current Subtask**: {step}
+    """
+
+    response: Action = action_model(
+        prompt, sys_prompt=SYS_PROMPT_MID, image=current_screenshot
+    )
+    action_model.manual_unload()
+    del action_model
+    torch.cuda.empty_cache()
+
+    json_pattern = r"```json\s*(.*?)\s*```"
+    json_match = re.search(json_pattern, response, re.DOTALL)
+
+    if json_match:
+        json_str = json_match.group(1)
+    else:
+        # If not found between code blocks, try to find a JSON object directly
+        json_pattern = r"\{.*?\}"
+        json_match = re.search(json_pattern, response, re.DOTALL)
+        if json_match:
             json_str = json_match.roup(0)
         else:
             logger.error("No JSON content found in the validator response")
 
     try:
         plan_data = json.loads(json_str)
+        action_data = plan_data.get("action", {})
         log_variable(
-            "plan_validation",
-            {"problem_id": problem.id, "plan": plan, "validation_result": plan_data},
-            {"expected_solution": expected_steps},
+            "action_inference",
+            {"step": step, "action": response},
         )
-        score = plan_data.get("score", {})
+        action_type = action_data.get("type", {})
+        target = action_data.get("target", {})
+        command = action_data.get("command", {})
 
     except json.JSONDecodeError as e:
         logger.error(f"Error decoding JSON from validation: {e}")
+        log_variable("action_inference_model_response", response)
 
-    return score
+    return action_type, target, command
 
 
 @log_function_entry_exit(logger)
-def execute_recovery_step(step, history, current_screenshot, problem, plan):
+def execute_recovery_step(step, gt_coords, history, current_screenshot, problem, plan):
     """
     Executes a single step in the recovery plan
 
     :param step: The current step to execute
+    :param gt_coords: Ground truth coordinates for the action (if applicable)
     :param history: History of actions taken during recovery
     :param current_screenshot: The current screenshot of the application
     :param problem: The problem object
@@ -290,64 +378,131 @@ def execute_recovery_step(step, history, current_screenshot, problem, plan):
     logger.debug(f"Current history state: {len(history.actions)} actions performed")
 
     try:
-        action_model = QwenVLActionModel("Qwen/Qwen2.5-VL-7B-Instruct")
-        action_model.manual_load()
-        logger.debug("Initialized QwenVLActionModel")
+        # action_type, target, command = infer_step_action(
+        #     step, history, current_screenshot, problem, plan
+        # )
 
-        # Create prompt with problem-specific context
         prompt = f"""
-        **Recovery Task**: Recover from a broken RPA process and get it back on track.
-        
-        **Last Successful Action**: {problem.last_successful_action}
-        
-        **Expected Action (Failed)**: {problem.expected_action}
-        
-        **Recovery Plan**: {", ".join(plan.steps)}.
-        
+        **Task**: {problem.robot_trace[0]["ActivityLabel"]}
+        **Plan**: {", ".join(plan.steps)}.
         **Plan Reasoning**: {plan.reasoning}
-        
+
         **History**:
         {history}
+
+        **Last Action**: {history.last_action or problem.last_successful_action}
+        **Result of Last Action**: {ActionResult.SUCCESS}
         
-        **Result of Last Action**: {history.last_result}
-        
-        **Current Step to Execute**: {step}
+        **Current Subtask (Instruction)**: {step}
+
+        **List of elements:**
         """
 
-        # Generate the action
+        action_model = QwenOmniparserActionModel("Qwen/Qwen2.5-VL-32B-Instruct")
+        action_model.manual_load()
         action = action_model.action(
-            RECOVERY_ACTION_PROMPT, prompt, image=current_screenshot
+            SYS_PROMPT_OMNIPARSER,
+            prompt,
+            image=current_screenshot,
         )
-
-        logger.info(
-            f"Generated action: {action.action} with target: {action.action_target}"
-        )
-
-        # Log the action to the variables log file
-        log_variable(
-            "action_execution",
-            {
-                "step": step,
-                "action_type": action.action,
-                "action_target": action.action_target,
-                "problem_id": problem.id,
-            },
-            {
-                "plan_context": plan.steps,
-                "history_length": len(history.actions) if history else 0,
-            },
-        )
-
-        # TODO: Check coordinates for actions that involve clicking.
-        result = ActionResult.SUCCESS
-
-        # Add action to history
-        history.append(action, result)
-        logger.debug("Added action to history with SUCCESS status")
-
         action_model.manual_unload()
         del action_model
         torch.cuda.empty_cache()
+
+        result = ActionResult.SUCCESS  # Default to success if its not a click
+        if "click" in action.action.lower():
+            # grounding_model = UITarsActionModel("ByteDance-Seed/UI-TARS-7B-DPO")
+            # grounding_model.manual_load()
+
+            # prompt = f'In this UI screenshot, what is the position of the element corresponding to the command: "{command}" (with bbox)?'
+
+            # action: Action = grounding_model.action(
+            #     UITARS_GROUNDING, prompt, image=current_screenshot
+            # )
+
+            # grounding_model.manual_unload()
+            # del grounding_model
+            # torch.cuda.empty_cache()
+
+            logger.info(f"Generated action: {action}")
+            log_variable(
+                "action_execution",
+                {
+                    "step": step,
+                    "action_type": action.action,
+                    "action_target": action.action_target,
+                    "action_coords": action.coords,
+                    "problem_id": problem.id,
+                },
+                {
+                    "plan_context": plan.steps,
+                    "history_length": len(history.actions) if history else 0,
+                },
+            )
+            if gt_coords is not None:
+                if logger.isEnabledFor(logging.DEBUG):
+                    # Show the coordinates on the image
+                    plt.imshow(current_screenshot)
+                    plt.scatter(
+                        [float(action.coords[0])],
+                        [float(action.coords[1])],
+                        color="red",
+                        label="Action Coordinates",
+                    )
+                    plt.scatter(
+                        [float(gt_coords[0][0]), float(gt_coords[2][0])],
+                        [float(gt_coords[0][1]), float(gt_coords[1][1])],
+                        color="blue",
+                        label="Ground Truth Coordinates",
+                    )
+                    plt.legend()
+                    plt.title(f"Action Coordinates vs Ground Truth for {step}")
+                    plt.show()
+
+                # Check if the action coordinates are within the ground truth coordinates
+                if float(
+                    float(gt_coords[0][0])
+                    <= float(action.coords[0])
+                    <= float(gt_coords[2][0])
+                ) and float(gt_coords[0][1]) <= float(action.coords[1]) <= float(
+                    float(gt_coords[1][1])
+                ):
+                    logger.info(
+                        "Action coordinates are within the ground truth coordinates"
+                    )
+                else:
+                    logger.warning(
+                        "Action coordinates are outside the ground truth coordinates"
+                    )
+                    result = ActionResult.FAIL
+
+        else:
+            action = Action(
+                prompt=step,
+                raw=step,
+                action=action.action,
+                action_target=action.action_target,
+                coords=gt_coords,
+            )
+            result = ActionResult.SUCCESS
+            logger.info(f"Generated action: {action}")
+            log_variable(
+                "action_execution",
+                {
+                    "step": step,
+                    "action_type": action.action,
+                    "action_target": action.action_target,
+                    "action_coords": action.coords,
+                    "problem_id": problem.id,
+                },
+                {
+                    "plan_context": plan.steps,
+                    "history_length": len(history.actions) if history else 0,
+                },
+            )
+
+        history.append(action, result)
+        logger.debug("Added action to history with SUCCESS status")
 
         return result
 
@@ -395,16 +550,12 @@ def solve_problem(problem_id, max_retry_attempts=3):
         problem = get_problem(problem_id)
         logger.info(f"Retrieved problem: {problem}")
 
-        image_path = os.path.join(
-            os.path.dirname(problem.log_path), problem.robot_trace[0]["Screenshot"][0]
-        )
-
-        logger.info(f"Loading screenshot from {image_path}")
         try:
             current_screenshot = Image.open(problem.robot_last_screenshot)
+            logger.info(f"Loading screenshot from {problem.robot_last_screenshot}")
             logger.debug("Screenshot loaded successfully")
         except Exception as e:
-            log_exception(logger, e, {"image_path": image_path})
+            log_exception(logger, e, {"image_path": problem.robot_last_screenshot})
             # Log the validation failure for screenshot loading
             log_variable(
                 "validation_failure",
@@ -424,119 +575,67 @@ def solve_problem(problem_id, max_retry_attempts=3):
 
         # Create recovery plan
         logger.info("Creating recovery plan")
-        plan = plan_recovery(problem, current_screenshot)
+        plan, coordinate_mapping = plan_recovery(problem, current_screenshot)
 
         # Execute recovery steps
         logger.info("Executing recovery steps")
         attempt = 0
 
-        while attempt < max_retry_attempts:
-            logger.info(f"Recovery attempt {attempt + 1} of {max_retry_attempts}")
+        success = True
+        for i, step in enumerate(plan.steps):
+            logger.info(f"Executing step {i + 1} of {len(plan.steps)}: {step}")
 
-            success = True
-            for i, step in enumerate(plan.steps):
-                logger.info(f"Executing step {i + 1} of {len(plan.steps)}: {step}")
+            current_screenshot = Image.open(problem.expected_screenshots[i])
 
-                result = execute_recovery_step(
-                    step, history, current_screenshot, problem, plan
-                )
+            gt_coords = coordinate_mapping.get(str(i + 1), None)
+            result = execute_recovery_step(
+                step, gt_coords, history, current_screenshot, problem, plan
+            )
 
-                if result != ActionResult.SUCCESS:
-                    logger.warning(f"Step {i + 1} failed with result {result}")
-                    # Log the step execution failure
-                    log_variable(
-                        "step_validation_failure",
-                        {
-                            "problem_id": problem_id,
-                            "attempt": attempt + 1,
-                            "step_number": i + 1,
-                            "step": step,
-                            "result": str(result),
-                        },
-                        {
-                            "plan_context": plan.steps,
-                            "history": history.get_formatted_history(),
-                        },
-                    )
-                    success = False
-                    break
-
-                # In a real implementation, we would update the screenshot here
-                # For this toy problem, we'll simulate moving to the next screenshot
-                next_idx = min(
-                    problem.last_successful_action_idx + i + 1,
-                    len(problem.robot_trace) - 1,
-                )
-                if next_idx < len(problem.robot_trace):
-                    next_image_path = os.path.join(
-                        os.path.dirname(problem.log_path),
-                        problem.robot_trace[next_idx]["Screenshot"][0],
-                    )
-                    try:
-                        current_screenshot = Image.open(next_image_path)
-                        logger.debug(f"Updated screenshot to {next_image_path}")
-                    except Exception as e:
-                        log_exception(logger, e, {"image_path": next_image_path})
-                        # Log screenshot transition failure
-                        log_variable(
-                            "screenshot_transition_failure",
-                            {
-                                "problem_id": problem_id,
-                                "attempt": attempt + 1,
-                                "step_number": i + 1,
-                                "current_image": problem.robot_last_screenshot,
-                                "next_image_path": next_image_path,
-                                "error": str(e),
-                            },
-                        )
-                        logger.warning(
-                            f"Could not load next screenshot {next_image_path}, continuing with current"
-                        )
-                        raise LoggedException()
-
-            if success:
-                # Log successful recovery
+            if result != ActionResult.SUCCESS:
+                logger.warning(f"Step {i + 1} failed with result {result}")
+                # Log the step execution failure
                 log_variable(
-                    "recovery_success",
+                    "step_validation_failure",
                     {
                         "problem_id": problem_id,
-                        "attempts_needed": attempt + 1,
-                        "steps_executed": len(plan.steps),
-                        "total_actions": len(history.actions),
+                        "attempt": attempt + 1,
+                        "step_number": i + 1,
+                        "step": step,
+                        "result": str(result),
                     },
-                    {"plan": plan.steps, "reasoning": plan.reasoning},
+                    {
+                        "plan_context": plan.steps,
+                        "history": history,
+                    },
                 )
-                logger.info("Recovery successful!")
-                return True
+                success = False
 
-            # If we get here, recovery failed - try again with updated plan
-            logger.warning(f"Recovery attempt {attempt + 1} failed, retrying")
-            # Log failed recovery attempt
+        if success:
+            # Log successful recovery
+            log_variable(
+                "recovery_success",
+                {
+                    "problem_id": problem_id,
+                    "attempts_needed": attempt + 1,
+                    "steps_executed": len(plan.steps),
+                    "total_actions": len(history.actions),
+                },
+                {"plan": plan.steps, "reasoning": plan.reasoning},
+            )
+            logger.info("Recovery successful!")
+
+        else:
             log_variable(
                 "recovery_attempt_failure",
                 {
                     "problem_id": problem_id,
-                    "attempt_number": attempt + 1,
                     "steps_executed": i + 1,
                     "total_actions": len(history.actions),
                 },
-                {"plan": plan.steps, "history": history.get_formatted_history()},
+                {"plan": plan.steps, "history": history},
             )
-            plan = plan_recovery(problem, current_screenshot)
-            attempt += 1
-
-        # Log maximum retries reached
-        log_variable(
-            "max_retries_reached",
-            {
-                "problem_id": problem_id,
-                "max_retry_attempts": max_retry_attempts,
-                "total_actions": len(history.actions),
-            },
-            {"last_plan": plan.steps, "history": history.get_formatted_history()},
-        )
-        logger.error(f"Failed to recover after {max_retry_attempts} attempts")
-        return False
+        return success
 
     except LoggedException:
         logger.error("Problem solving terminated due to a logged exception")
