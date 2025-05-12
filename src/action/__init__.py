@@ -5,13 +5,22 @@ This module contains implementations of action models for interpreting and execu
 """
 
 from .base import Action, ActionInterface, ActionResult, History
-from .qwen_action import AtlasActionmodel, QwenVLActionModel
+from .qwen_action import (
+    AtlasBaseActionModel,
+    QwenVLActionModel,
+    AtlasProActionModel,
+    UITarsActionModel,
+)
+from .qwen_omniparser import QwenOmniparserActionModel
 
 __all__ = [
     "Action",
     "ActionInterface",
     "ActionResult",
     "History",
-    "AtlasActionmodel",
+    "AtlasBaseActionModel",
+    "AtlasProActionModel",
     "QwenVLActionModel",
+    "UITarsActionModel",
+    "QwenOmniparserActionModel",
 ]

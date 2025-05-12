@@ -16,8 +16,8 @@ class Action:
     def __init__(
         self,
         prompt: List[dict[str, str]],
-        action_target: str | None,
         raw: str,
+        action_target: str | None = None,
         action: Optional[str] = None,
         reasoning: Optional[List[str | Any] | str] = None,
         coords: Optional[Tuple[float, float]] = None,
@@ -94,6 +94,11 @@ class History:
     def last_result(self):
         last = next(iter(self.results[-1:]), None)
         return last.result if last else None
+
+    @property
+    def last_action(self):
+        last = next(iter(self.actions[-1:]), None)
+        return last if last else None
 
     def append(self, action: Action, result: ActionResult):
         self.actions.append(action)
