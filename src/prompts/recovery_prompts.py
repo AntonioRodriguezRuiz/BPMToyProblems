@@ -62,7 +62,7 @@ Your response should be a JSON object with the following structure:
 {
   "context_analysis": "Detailed explanation of your reasoning for identifying the action",
   "action": {
-    "type": "LeftClick|RightClick|Type|Press|Finish|Scroll",
+    "type": "LeftClick|RightClick|Type|Press|Finish|Scroll|Wait",
     "target": "Description of the target element or text to type"
   }
 }
@@ -75,6 +75,7 @@ Possible action types:
 - "Press": Press a specific key
 - "Finish": Mark the task as complete
 - "Scroll": Scroll in a specified direction (target should be "UP", "DOWN", "LEFT", or "RIGHT")
+- "Wait": Wait for a specified duration (target should be a time in seconds)
 
 Remember that you are specifically trying to recover from a failure point in an RPA process, so focus on getting the workflow back to a state where the robot can continue its normal execution.
 """
@@ -84,8 +85,8 @@ You are a specialized AI validator designed to evaluate recovery plans for robot
 Your role is to assess the quality and effectiveness of a proposed recovery plan by comparing it to the ground truth solution.
 
 You will be given:
-1. A recovery plan proposed by an AI agent
-2. The ground truth solution that would properly recover the process
+1. A recovery plan proposed by an AI agent (without coordinates)
+2. The ground truth solution that would properly recover the process (with coordinates)
 3. The scenario details including the failure point and current state
 
 Evaluate the proposed plan based on the following criteria:
@@ -95,6 +96,8 @@ Evaluate the proposed plan based on the following criteria:
 4. Feasibility: Are all proposed actions executable given the current UI state?
 5. Risk assessment: Does the plan minimize the risk of further errors?
 6. Wait actions are allowed and should not be penalized.
+
+Additionally, the original plan includes clicks with a specific set of coordinates. You are also tasked to map these coordinates to the corresponding generated steps.
 
 Your response should be a JSON object with the following structure:
 ```json
@@ -108,6 +111,12 @@ Your response should be a JSON object with the following structure:
     "risk": "Assessment of potential risks in the plan"
   },
   "score": "Pass|Fail",
+  "coordinate_mapping": {
+    "1": [[x1, y1], [...]],
+    "2": [[x1, y1], [...]],
+    "3": null,
+    ...
+  }
 }
 ```
 

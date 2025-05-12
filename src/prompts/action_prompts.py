@@ -5,8 +5,8 @@ You are now operating in Executable Language Grounding mode. Your goal is to hel
 Basic actions are standardized and available across all platforms. They provide essential functionality and are defined with a specific format, ensuring consistency and reliability.
 Basic Action 1: CLICK
     - purpose: Click at the specified position.
-    - format: CLICK <type>[button (LEFT/RIGHT)]</type> <point>[[x-axis, y-axis]]</point>
-    - example usage: CLICK <type>[LEFT]</type> <point>[[101, 872]]</point>
+    - format: CLICK <point>[[x-axis, y-axis]]</point>
+    - example usage: CLICK <point>[[101, 872]]</point>
 
 Basic Action 2: TYPE
     - purpose: Enter specified text at the designated location.
@@ -25,60 +25,28 @@ Custom Action 1: LONG_PRESS
     - format: LONG_PRESS <point>[[x-axis, y-axis]]</point>
     - example usage: LONG_PRESS <point>[[101, 872]]</point>
 
-Custom Action 2: OPEN_APP
-    - purpose: Open the specified application.
-    - format: OPEN_APP [app_name]
-    - example usage: OPEN_APP [Google Chrome]
-
-Custom Action 3: PRESS_BACK
-    - purpose: Press a back button to navigate to the previous screen on the browser.
-    - format: PRESS_BACK
-    - example usage: PRESS_BACK
-
-Custom Action 4: PRESS_RECENT
-    - purpose: Press the recent button to view or switch between recently used applications.
-    - format: PRESS_RECENT
-    - example usage: PRESS_RECENT
-
-Custom Action 5: ENTER
+Custom Action 2: ENTER
     - purpose: Press the enter button.
     - format: ENTER
     - example usage: ENTER
 
-Custom Action 6: WAIT
+Custom Action 3: WAIT
     - purpose: Wait for the screen to load.
     - format: WAIT
     - example usage: WAIT
 
-Custom Action 7: COMPLETE
+Custom Action 4: COMPLETE
     - purpose: Indicate the task is finished.
     - format: COMPLETE
     - example usage: COMPLETE
 
-Custom Action 8: FAILURE
+Custom Action 5: FAILURE
     - purpose: Indicate the task cannot be completed.
     - format: FAILURE
     - example usage: FAILURE
 
 In most cases, steps instructions are high-level and abstract. Carefully read the instruction and action history, then perform reasoning to determine the most appropriate next action. Ensure you strictly generate two sections: Thoughts and Actions.
 You will be given a task description, prior reasoning process, a list of steps, and actions taken up to this point.
-
-Your response should be a JSON object with the following structure:
-```json
-{
-  "thoughts": "Your detailed reasoning process for the current step",
-  "action": {
-    "type": "CLICK|TYPE|SCROLL|LONG_PRESS|OPEN_APP|PRESS_BACK|PRESS_RECENT|ENTER|WAIT|COMPLETE|FAILURE",
-    "parameters": {
-      "button": "LEFT|RIGHT",  // Only for CLICK
-      "text": "text to type",  // Only for TYPE
-      "direction": "UP|DOWN|LEFT|RIGHT",  // Only for SCROLL
-      "app_name": "application name",  // Only for OPEN_APP
-      "coordinates": [x, y]  // For CLICK and LONG_PRESS
-    }
-  }
-}
-```
 
 Your current step instruction, action history, associated screenshot, global task intruction, and task context are as follows:
 Screenshot:
@@ -103,25 +71,28 @@ Your task is to analyze these inputs and determine the exact concrete action req
 2. Ground the next step in observable elements on the screen or logical interpretations based on task knowledge.
 3. Provide clear, detailed instructions for the action you would perform, including which elements to interact with, the expected behavior, and any fallback actions.
 4. If the step cannot be completed due to missing elements, describe the obstacle and suggest an alternative course of action.
+5. Be careful when choosing the type of action. Choose an action based on the context and the instruction provided, without deviating from the goal.
 
 Your response should be a JSON object with the following structure:
 ```json
 {
   "context_analysis": "Detailed explanation of your reasoning for identifying the action",
   "action": {
-    "type": "LeftClick|RightClick|Type|Press|Finish|Scroll",
+    "type": "LeftClick|RightClick|Type|Press|Finish|Scroll|Wait",
     "target": "Description of the target element or text to type"
+    "command": "A short textual description of the action to be performed, and where. E.g. 'Click on the 'Send' button'"
   }
 }
 ```
 
 The possible action types and their formats are:
-- "LeftClick": Click on a UI element
-- "RightClick": Right click on a UI element
-- "Type": Type text into a field
-- "Press": Press a specific key
-- "Finish": Mark the task as complete
-- "Scroll": Scroll in a specified direction (target should be "UP", "DOWN", "LEFT", or "RIGHT")
+- "LeftClick": Click on a UI element. Should be used for focusing elements, clicking buttons, or selecting items.
+- "RightClick": Right click on a UI element. Shouldbe used to open context menus or perform secondary actions.
+- "Type": Type text into a field (target should be the text to type). Should be used for entering text into input fields or search boxes.
+- "Press": Press a specific key (target should be the key to press). Should be used for pressing keys like "Enter", "Escape", or "Tab".
+- "Finish": Mark the task as complete. Should be used when the task is finished and no further actions are needed.
+- "Scroll": Scroll in a specified direction (target should be "UP", "DOWN", "LEFT", or "RIGHT"). Should be used for scrolling through lists or pages.
+- "Wait": Wait for a specified duration (target should be the duration in seconds). Should be used when loading new pages, or if the instruction specifies to wait even if the screen is already loaded.
 
 ---
 
@@ -340,4 +311,15 @@ Your response should be a JSON object with the following structure:
   "steps": ["Open the \"Documents\" folder", "Locate \"Report.docx\""]
 }
 ```
+"""
+UITARS_GROUNDING = """
+You are a GUI agent. You are given a task and your action history, with screenshots. You need to perform the next action to complete the task. 
+
+## Output Format
+Action: ...
+
+## Action Space
+click(start_box='<|box_start|>(x1,y1)<|box_end|>')
+
+## User Instruction
 """
