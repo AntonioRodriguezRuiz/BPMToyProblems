@@ -8,12 +8,23 @@
 # The agent is allowed to iteratively act over the screen until one of the following conditions is met:
 # 1. The agent solves the problem and gives control back to the robot
 # 2. The agent is unable to solve the problem and raises the error to a human operator
+import logging
+from utils.logging_utils import (
+    setup_logger,
+    log_exception,
+    log_function_entry_exit,
+    LoggedException,
+    log_variable,
+)
+
+# Initialize logger
+logger = setup_logger(__name__)
+logger.propagate = False
 
 import polars as pl
 import sys
 from PIL import Image
 import torch
-import logging
 import json
 import re
 from matplotlib import pyplot as plt
@@ -27,13 +38,6 @@ from action import (
 )
 from planner import Plan, QwenVLPlanner
 from models import TextModel, Qwen2_5VLModel
-from utils.logging_utils import (
-    setup_logger,
-    log_exception,
-    log_function_entry_exit,
-    LoggedException,
-    log_variable,
-)
 from prompts import (
     SYS_PROMPT_MID,
     RECOVERY_PLANNER_PROMPT,
@@ -44,8 +48,6 @@ from prompts import (
 )
 from utils import resize_img
 
-# Initialize logger
-logger = setup_logger(__name__)
 
 problems = {
     1: {
@@ -72,12 +74,46 @@ problems = {
             "resources/ToyProblem1/images_new/1_2_5.png",  # On input
             "resources/ToyProblem1/images_new/1_2_5_2.png",  # On last click
         ],
+        "error": 'UI Component for "password input" not found',
+        "variables": {
+            "username": "username",
+            "password": "Hs629$hb",
+            "clipboard_content": None,
+        },
     },
     2: {
         "id": 2,
         "log_path": "resources/ToyProblem2/log.csv",
-        "last_successful_action": 3,
-        "robot_last_screenshot": "resources/ToyProblem2/images_new/robot_last_screenshot.png",
+        "last_successful_action": 30,
+        "robot_last_screenshot": "resources/ToyProblem2/images_new/3_1.png",
+        "expected_solution": [
+            (
+                "Any action is valid in this step",
+                [(0, 0), (0, 1080), (1920, 0), (1920, 1080)],
+            )
+            * 15
+        ],
+        "expected_screenshots": [
+            "resources/ToyProblem2/images_new/3_1.png",  # On click
+            "resources/ToyProblem2/images_new/3_2.png",  # On type
+            "resources/ToyProblem2/images_new/3_3.png",  # On click
+            "resources/ToyProblem2/images_new/3_4.png",  # On type
+            "resources/ToyProblem2/images_new/3_5.png",  # On click
+            "resources/ToyProblem2/images_new/3_6.png",  # On type
+            "resources/ToyProblem2/images_new/3_7.png",  # On click
+            "resources/ToyProblem2/images_new/3_8.png",  # On type
+            "resources/ToyProblem2/images_new/3_9.png",  # On click
+            "resources/ToyProblem2/images_new/3_10.png",  # On type
+            "resources/ToyProblem2/images_new/3_11.png",  # On click
+            "resources/ToyProblem2/images_new/3_12.png",  # On type
+            "resources/ToyProblem2/images_new/3_13.png",  # On click
+            "resources/ToyProblem2/images_new/3_14.png",  # On type
+            "resources/ToyProblem2/images_new/3_15.png",  # On submit
+        ],
+        "error": 'UI Component for "First Name" not found',
+        "variables": {
+            "clipboard_content": "Albert",
+        },
     },
 }
 
@@ -88,16 +124,19 @@ class Problem:
         id,
         log_path,
         robot_trace,
+        error,
         last_successful_action_idx,
         last_successful_action,
         robot_last_screenshot,
         expected_action,
         expected_solution,
         expected_screenshots,
+        variables,
     ):
         self.id = id
         self.log_path = log_path
         self.robot_trace = robot_trace
+        self.error = error
         self.last_successful_action_idx = last_successful_action_idx
         self.last_successful_action = last_successful_action  # Semantic description
         self.robot_last_screenshot = robot_last_screenshot
@@ -106,6 +145,7 @@ class Problem:
             expected_solution  # List of expected actions to be performed
         )
         self.expected_screenshots = expected_screenshots
+        self.variables = variables  # Variables to be used in the process
 
     def __repr__(self):
         return f"Problem(id={self.id}, log_path={self.log_path}, last_successful_action={self.last_successful_action})"
@@ -132,12 +172,14 @@ def get_problem(problem_id):
         id=problem_id,
         log_path=problems[problem_id]["log_path"],
         robot_trace=robot_trace,
+        error=problems[problem_id]["error"],
         last_successful_action_idx=problems[problem_id]["last_successful_action"],
         last_successful_action=last_successful_action,
         robot_last_screenshot=problems[problem_id]["robot_last_screenshot"],
         expected_action=expected_action,
         expected_solution=problems[problem_id].get("expected_solution", []),
         expected_screenshots=problems[problem_id].get("expected_screenshots", []),
+        variables=problems[problem_id].get("variables", {}),
     )
 
     return problem
@@ -160,19 +202,38 @@ def plan_recovery(problem, current_screenshot):
         logger.debug("Initialized QwenVLPlanner for recovery")
 
         # Create prompt with problem-specific context
+        with pl.Config(
+            tbl_formatting="MARKDOWN",
+            tbl_hide_column_data_types=True,
+            tbl_hide_dataframe_shape=True,
+            tbl_cols=-1,
+            tbl_rows=-1,
+        ):
+            robot_trace: str = problem.robot_trace.__str__()
+            log_variable(
+                "robot_trace",
+                robot_trace,
+            )
         prompt = f"""
-        **Recovery Task**: Recover from a broken RPA process and get it back on track.
+        **Recovery Task**: You need to finish the activity: {problem.robot_trace[0]["ActivityLabel"]}.
         
         **Last Successful Action**: {problem.last_successful_action}
         
-        **Failed Action (Objective)**: {problem.expected_action}
+        **Failed Action**: {problem.expected_action}
+        **Error**: {problem.error}
+
+        **Variables**:
+        {problem.variables}
         
         **Process Context**:
         This is part of a {problem.robot_trace[0]["ActivityLabel"]} workflow.
         The robot was performing a sequence of UI interactions when it failed.
+        The robot cannot take control back until the current task is fully completed.
+        The sequence of previous actions is as follows:
+        {robot_trace}
         
         **Goal**:
-        Identify what went wrong and provide steps to recover the process so the robot can continue.
+        Identify what went wrong and provide steps to recover the process by finishing the current task so the robot can continue with the next task.
         """
 
         logger.debug(f"Generated recovery planning prompt for problem {problem.id}")

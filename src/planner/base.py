@@ -1,6 +1,5 @@
 from abc import abstractmethod
 from typing import Optional
-from utils.logging_utils import setup_logger
 
 
 class Plan:

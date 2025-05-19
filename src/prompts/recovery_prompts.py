@@ -8,6 +8,7 @@ You will be given:
 2. The action that was expected to be performed but failed
 3. The current screenshot of the application
 4. Information about the overall process
+5. A list of variables used in the process, including the ones that may have already been used. If you need to use them, include their values in the plan.
 
 Follow these guidelines:
 1. Carefully analyze the last successful action and the expected action to understand where the process broke.
@@ -15,6 +16,14 @@ Follow these guidelines:
 3. Determine what might have caused the failure (e.g., UI changes, timing issues, unexpected popups).
 4. Create a precise step-by-step plan to recover the process and continue from where it left off.
 5. The goal is to get the process back to a state where the robot can continue its automation.
+6. Asume no autofocus exists, so you need to click on the element to focus it before typing.
+7. Avoid "locate" actions. If you need to click on an element, specify the exact action (e.g., "click on the button labeled 'Submit'").
+8. Generate as many steps as needed to recover the process, but avoid unnecessary actions.
+
+List of actions to avoid:
+- "Wait" actions should be avoided unless absolutely necessary.
+- "Locate" actions should be avoided. Instead, specify the exact action to take on the UI element.
+- "Check" actions after locating or interacting with an element.
 
 Your response should be a JSON object with the following structure:
 ```json
@@ -35,7 +44,22 @@ Your reasoning should include:
 3. What steps are needed to recover and continue the process
 4. Any potential challenges or alternative approaches
 
-Remember that your plan will be executed by an action module capable of interacting with UI elements, so be specific about what elements to interact with and how.
+Remember that your plan will be executed by an action module capable of interacting with UI elements, so be specific about what elements to interact with and how. Avoid vague instructions or generalizations.
+
+### Example of a recovery plan:
+```json
+{
+  "reasoning": {
+    "failure_analysis": "The robot expected to click on the 'Submit' button, but it was not visible due to a modal popup.",
+    "ui_state": "The current UI shows a modal popup that obscures the 'Submit' button.",
+    "recovery_approach": "Close the modal popup and then click on the 'Submit' button.",
+    "challenges": "The modal may take time to close, and the button may still be obscured."
+  },
+  "steps": [
+    "Click on the 'Close' button of the modal popup",
+    "Click on the 'Submit' button"
+  ]
+}
 """
 
 RECOVERY_ACTION_PROMPT = """
