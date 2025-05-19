@@ -72,7 +72,7 @@ class QwenVLActionModel(ActionInterface, Qwen2_5VLModel):
 
             action_info = action_data.get("action", {})
             action_type = action_info.get("type", None)
-            action_target = action_info.get("target", None)
+            action_target = action_info.get("target_id", None)
 
             if not action_type:
                 # Fall back to the old regex pattern for backward compatibility

@@ -1,10 +1,13 @@
 import re
 import json
+import torch
 
 from action.base import Action, ActionInterface
 from models.qwen_vl_model import Qwen2_5VLModel
 
 from action.omniparser import analyze_ui_image
+
+from utils.logging_utils import log_variable
 
 
 class QwenOmniparserActionModel(ActionInterface, Qwen2_5VLModel):
@@ -25,7 +28,8 @@ class QwenOmniparserActionModel(ActionInterface, Qwen2_5VLModel):
         # Convert the processed image to a format suitable for the model
         kwargs["image"] = annotated_image
 
-        user_prompt = f"{user_prompt} {labels}"
+        user_prompt = f"{user_prompt} {list(map(lambda label: {'id': label['id'], 'content': label['content'], 'interactivity': label['interactivity']}, labels))}"
+        # user_prompt = f"{user_prompt} {labels}"
 
         # Call the inference method directly instead of _call
         messages = []
@@ -34,13 +38,34 @@ class QwenOmniparserActionModel(ActionInterface, Qwen2_5VLModel):
         messages.append({"role": "user", "content": user_prompt})
 
         # Process the model's output
-        processed_output_text = self._call(
-            user_prompt, sys_prompt=sys_prompt, *args, **kwargs
+        retry = 0
+        while retry < 3:
+            processed_output_text = self._call(
+                user_prompt, sys_prompt=sys_prompt, max_tokens=4096, *args, **kwargs
+            ).strip()
+
+            if self.parse_action(
+                messages, processed_output_text, labels, image=image
+            ).action:
+                break
+            log_variable(
+                "failed_action_model_output",
+                {
+                    "prompt": user_prompt,
+                    "sys_prompt": sys_prompt,
+                    "model_output": processed_output_text,
+                },
+            )
+            retry += 1
+
+        log_variable(
+            "action_model_output",
+            processed_output_text,
         )
 
-        if not processed_output_text:
+        if retry == 3:
             raise RuntimeError(
-                "Something went wrong while generating the action and no output was given by the model"
+                "Failed to parse action after 3 attempts. Please check the model output."
             )
 
         return self.parse_action(messages, processed_output_text, labels, image=image)
@@ -83,12 +108,12 @@ class QwenOmniparserActionModel(ActionInterface, Qwen2_5VLModel):
             action_type = action_info.get("type", None)
 
             if "click" in action_type.lower():
-                action_target_id = int(action_info.get("target", 0))
+                action_target = action_info.get("target", "")
+                action_target_id = int(action_info.get("target_id", 0))
                 action_target_dict = (
                     labels[action_target_id] if action_target_id else None
                 )
                 if action_target_dict:
-                    action_target = action_target_dict["content"]
                     width, height = image.size
                     coords = (
                         (
@@ -122,8 +147,8 @@ class QwenOmniparserActionModel(ActionInterface, Qwen2_5VLModel):
 
             return Action(
                 prompt,
-                action_target,
                 model_response,
+                action_target,
                 action=action_type,
                 reasoning=context_analysis,
                 coords=coords,

@@ -39,10 +39,13 @@ Model Reasoning: {self.reasoning}
 Provided action: {self.action} {self.action_target} {self.key if self.key else self.coords if self.coords else ""}
 """
 
+    def to_str_simple(self):
+        return f"""
+Action: {self.action} {self.action_target} {self.key if self.key else self.coords if self.coords else ""}
+"""
+
     def to_str_extended(self):
         return f"""
-Prompt: {self.prompt}
----
 Raw Output: {self.raw}
 ---
 Model Reasoning: {self.reasoning}
