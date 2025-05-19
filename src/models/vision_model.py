@@ -1,4 +1,4 @@
-from multiprocessing import Process, Queue
+from torch.multiprocessing import Process, Queue, set_start_method
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
@@ -142,7 +142,7 @@ class VisionModel(ModelInterface):
     def _local_inference(
         self,
         messages: List[Dict[str, Any]],
-        max_tokens: int = 512,
+        max_tokens: int = 2048,
         **kwargs: Any,
     ) -> str:
         if self.loaded:
@@ -191,7 +191,9 @@ class VisionModel(ModelInterface):
             "",
         )
 
-        self.unload(model, processor, inputs, generated_ids, generated_ids_trimmed)
+        if self.loaded:
+            self.unload(model, processor)
+        self.unload(model, processor)
         return processed_output_text
 
     def _call(
@@ -212,6 +214,7 @@ class VisionModel(ModelInterface):
         if self.loaded:
             result = self.inference(sys_prompt, prompt, max_tokens, **kwargs)
         else:
+            set_start_method("spawn")
             result_queue: Queue = Queue()
 
             kwargs["result_queue"] = result_queue

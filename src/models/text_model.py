@@ -51,7 +51,7 @@ class TextModel(ModelInterface):
         self,
         sys_prompt: str,
         user_prompt: str,
-        max_tokens: int = 512,
+        max_tokens: int = 2048,
         **kwargs: Any,
     ) -> Optional[str]:
         """
@@ -95,7 +95,7 @@ class TextModel(ModelInterface):
     def _local_inference(
         self,
         messages: List[Dict[str, Any]],
-        max_tokens: int = 512,
+        max_tokens: int = 2048,
         **kwargs: Any,
     ) -> str:
         if self.loaded:
@@ -158,7 +158,7 @@ class TextModel(ModelInterface):
         """
         assert isinstance(prompt, str), "prompt must be a string"
         assert stop is None or isinstance(stop, list), "stop must be None or a list"
-        max_tokens: int = kwargs.pop("max_tokens", 512)
+        max_tokens: int = kwargs.pop("max_tokens", 2048)
         sys_prompt: str = kwargs.pop("sys_prompt", "")
 
         if self.loaded:

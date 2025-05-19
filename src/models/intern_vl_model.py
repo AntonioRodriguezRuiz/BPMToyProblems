@@ -16,7 +16,7 @@ class InternVLModel(VisionModel):
         self,
         sys_prompt: str,
         user_prompt: str,
-        max_tokens: int = 512,
+        max_tokens: int = 2048,
         **kwargs: Any,
     ) -> Optional[str]:
         """
