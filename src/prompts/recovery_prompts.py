@@ -20,7 +20,15 @@ Follow these guidelines:
 7. Avoid "locate" actions. If you need to click on an element, specify the exact action (e.g., "click on the button labeled 'Submit'").
 8. Generate as many steps as needed to recover the process, but avoid unnecessary actions.
 
+The steps should be composed of concrete actions that can be executed by an action module. The following actions are allowed:
+- "Click" actions on UI elements. Either left or right clicks.
+- "Type" actions to input text into fields. These fields should be focused before typing with a click.
+- "Press" actions to simulate key presses
+- "Type" actions to input text into fields
+- "Scroll" actions
+
 List of actions to avoid:
+- Including coordinates in the steps
 - "Wait" actions should be avoided unless absolutely necessary.
 - "Locate" actions should be avoided. Instead, specify the exact action to take on the UI element.
 - "Check" actions after locating or interacting with an element.
@@ -87,7 +95,7 @@ Your response should be a JSON object with the following structure:
   "context_analysis": "Detailed explanation of your reasoning for identifying the action",
   "action": {
     "type": "LeftClick|RightClick|Type|Press|Finish|Scroll|Wait",
-    "target": "Description of the target element or text to type"
+    "target_id": "Description of the target element or text to type"
   }
 }
 ```

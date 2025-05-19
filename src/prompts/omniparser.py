@@ -26,7 +26,8 @@ Your response should be a JSON object with the following structure:
   "context_analysis": "Detailed explanation of your reasoning for identifying the action",
   "action": {
     "type": "LeftClick|RightClick|Type|Press|Finish|Scroll|Wait",
-    "target": "id of the target element or text to type, as given in the **list of elements**. Only include the id if the action is a click, else, include text, key to press, or scroll direction. In case of wait, leave blank",
+    "target": "target element or text to type, as given in the **list of elements**. Only include the element if it is a click, else, include text, key to press, or scroll direction. In case of wait, leave blank"
+    "target_id": "id of the target element, if any, as given in the **list of elements**.",
   }
 }
 ```

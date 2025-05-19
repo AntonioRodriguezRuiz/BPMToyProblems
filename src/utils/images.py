@@ -2,8 +2,8 @@ from PIL import Image, ImageFile
 from io import BytesIO
 import base64
 
-MAX_HEIGHT = 720
-MAX_WIDTH = 1280
+MAX_HEIGHT = 1920
+MAX_WIDTH = 1080
 
 
 # Convert Image to Base64

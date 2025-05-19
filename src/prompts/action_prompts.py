@@ -79,7 +79,7 @@ Your response should be a JSON object with the following structure:
   "context_analysis": "Detailed explanation of your reasoning for identifying the action",
   "action": {
     "type": "LeftClick|RightClick|Type|Press|Finish|Scroll|Wait",
-    "target": "Description of the target element or text to type"
+    "target_id": "Description of the target element or text to type"
     "command": "A short textual description of the action to be performed, and where. E.g. 'Click on the 'Send' button'"
   }
 }
@@ -111,7 +111,7 @@ Open Gmail, Compose a new email, Add recipient "client@example.com", Set subject
   "context_analysis": "The current step in the plan is to add the recipient 'client@example.com'. The screenshot shows the Gmail compose window open, which is the correct context for this action. The 'To' field is visible and empty, ready for input. This is the field where I need to specify the recipient's email address.",
   "action": {
     "type": "LeftClick",
-    "target": "on the 'To' field in the compose window"
+    "target_id": "on the 'To' field in the compose window"
   }
 }
 ```
