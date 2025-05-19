@@ -75,6 +75,7 @@ problems = {
             "resources/ToyProblem1/images_new/1_2_5_2.png",  # On last click
         ],
         "error": 'UI Component for "password input" not found',
+        "focused_window": "Firefox Browser",
         "variables": {
             "username": "username",
             "password": "Hs629$hb",
@@ -95,6 +96,8 @@ problems = {
         ],
         "expected_screenshots": [
             "resources/ToyProblem2/images_new/3_1.png",  # On click
+            "resources/ToyProblem2/images_new/3_1.png",  # On click
+            "resources/ToyProblem2/images_new/3_1.png",  # On click
             "resources/ToyProblem2/images_new/3_2.png",  # On type
             "resources/ToyProblem2/images_new/3_3.png",  # On click
             "resources/ToyProblem2/images_new/3_4.png",  # On type
@@ -111,6 +114,7 @@ problems = {
             "resources/ToyProblem2/images_new/3_15.png",  # On submit
         ],
         "error": 'UI Component for "First Name" not found',
+        "focused_window": "Firefox Browser",
         "variables": {
             "clipboard_content": "Albert",
         },
@@ -125,6 +129,7 @@ class Problem:
         log_path,
         robot_trace,
         error,
+        focused_window,
         last_successful_action_idx,
         last_successful_action,
         robot_last_screenshot,
@@ -137,6 +142,7 @@ class Problem:
         self.log_path = log_path
         self.robot_trace = robot_trace
         self.error = error
+        self.focused_window = focused_window
         self.last_successful_action_idx = last_successful_action_idx
         self.last_successful_action = last_successful_action  # Semantic description
         self.robot_last_screenshot = robot_last_screenshot
@@ -159,7 +165,7 @@ def get_problem(problem_id):
     :return: The problem object
     """
     event_log = pl.read_csv(problems[problem_id]["log_path"])
-    robot_trace = event_log[problems[problem_id]["last_successful_action"] :]
+    robot_trace = event_log[: problems[problem_id]["last_successful_action"]]
 
     last_successful_action = event_log.row(
         problems[problem_id]["last_successful_action"] - 1, named=True
@@ -173,6 +179,7 @@ def get_problem(problem_id):
         log_path=problems[problem_id]["log_path"],
         robot_trace=robot_trace,
         error=problems[problem_id]["error"],
+        focused_window=problems[problem_id]["focused_window"],
         last_successful_action_idx=problems[problem_id]["last_successful_action"],
         last_successful_action=last_successful_action,
         robot_last_screenshot=problems[problem_id]["robot_last_screenshot"],
@@ -197,8 +204,7 @@ def plan_recovery(problem, current_screenshot):
     logger.info(f"Planning recovery for problem {problem.id}")
 
     try:
-        planner = QwenVLPlanner("Qwen/Qwen2.5-VL-32B-Instruct")
-        planner.manual_load()
+        planner = QwenVLPlanner("Qwen/Qwen2.5-VL-72B-Instruct")
         logger.debug("Initialized QwenVLPlanner for recovery")
 
         # Create prompt with problem-specific context
@@ -221,6 +227,7 @@ def plan_recovery(problem, current_screenshot):
         
         **Failed Action**: {problem.expected_action}
         **Error**: {problem.error}
+        **Focused Window**: {problem.focused_window}
 
         **Variables**:
         {problem.variables}
@@ -242,6 +249,8 @@ def plan_recovery(problem, current_screenshot):
         plan: Plan = planner.plan(
             RECOVERY_PLANNER_PROMPT, prompt, image=current_screenshot
         )
+        del planner
+        torch.cuda.empty_cache()
 
         logger.info(f"Generated recovery plan with {len(plan.steps)} steps")
         logger.debug(f"Recovery plan steps: {json.dumps(plan.steps, indent=2)}")
@@ -256,10 +265,6 @@ def plan_recovery(problem, current_screenshot):
             },
             {"prompt": prompt},
         )
-
-        planner.manual_unload()
-        del planner
-        torch.cuda.empty_cache()
 
         # Validate the plan against expected solutions
         score, coordinate_mapping = validate_recovery_plan(
@@ -313,12 +318,10 @@ def validate_recovery_plan(problem, plan, current_screenshot):
     **Expected Solution**: {json.dumps(problem.expected_solution, indent=2)}
     """
 
-    validator.manual_load()
     validation_result = validator(
         prompt, sys_prompt=RECOVERY_PLAN_VALIDATOR_PROMPT, image=current_screenshot
     )
     logger.info(f"Generated plan validation for problem {problem.id}")
-    validator.manual_unload()
     del validator
     torch.cuda.empty_cache()
 
@@ -412,7 +415,7 @@ def infer_step_action(step, history, current_screenshot, problem, plan):
             {"step": step, "action": response},
         )
         action_type = action_data.get("type", {})
-        target = action_data.get("target", {})
+        target = action_data.get("target_id", {})
         command = action_data.get("command", {})
 
     except json.JSONDecodeError as e:
@@ -423,10 +426,13 @@ def infer_step_action(step, history, current_screenshot, problem, plan):
 
 
 @log_function_entry_exit(logger)
-def execute_recovery_step(step, gt_coords, history, current_screenshot, problem, plan):
+def execute_recovery_step(
+    action_model, step, gt_coords, history, current_screenshot, problem, plan
+):
     """
     Executes a single step in the recovery plan
 
+    :param action_model: The action model to use for execution
     :param step: The current step to execute
     :param gt_coords: Ground truth coordinates for the action (if applicable)
     :param history: History of actions taken during recovery
@@ -444,8 +450,8 @@ def execute_recovery_step(step, gt_coords, history, current_screenshot, problem,
         # )
 
         prompt = f"""
-        **Task**: {problem.robot_trace[0]["ActivityLabel"]}
-        **Plan**: {", ".join(plan.steps)}.
+        **Task**: {problem.robot_trace[0]["ActivityLabel"][0]}
+        **Plan**: {".\n ".join(plan.steps)}.
         **Plan Reasoning**: {plan.reasoning}
 
         **History**:
@@ -459,18 +465,29 @@ def execute_recovery_step(step, gt_coords, history, current_screenshot, problem,
         **List of elements:**
         """
 
-        action_model = QwenOmniparserActionModel("Qwen/Qwen2.5-VL-32B-Instruct")
-        action_model.manual_load()
         action = action_model.action(
             SYS_PROMPT_OMNIPARSER,
             prompt,
             image=current_screenshot,
         )
-        action_model.manual_unload()
-        del action_model
-        torch.cuda.empty_cache()
 
         result = ActionResult.SUCCESS  # Default to success if its not a click
+        logger.info(f"Generated action: {action.to_str_extended()}")
+        log_variable(
+            "action_execution",
+            {
+                "step": step,
+                "action_type": action.action,
+                "action_target": action.action_target,
+                "action_coords": action.coords,
+                "raw": action.raw,
+                "problem_id": problem.id,
+            },
+            {
+                "plan_context": plan.steps,
+                "history_length": len(history.actions) if history else 0,
+            },
+        )
         if "click" in action.action.lower():
             # grounding_model = UITarsActionModel("ByteDance-Seed/UI-TARS-7B-DPO")
             # grounding_model.manual_load()
@@ -485,21 +502,9 @@ def execute_recovery_step(step, gt_coords, history, current_screenshot, problem,
             # del grounding_model
             # torch.cuda.empty_cache()
 
-            logger.info(f"Generated action: {action}")
-            log_variable(
-                "action_execution",
-                {
-                    "step": step,
-                    "action_type": action.action,
-                    "action_target": action.action_target,
-                    "action_coords": action.coords,
-                    "problem_id": problem.id,
-                },
-                {
-                    "plan_context": plan.steps,
-                    "history_length": len(history.actions) if history else 0,
-                },
-            )
+            ## MOCK GT_COORDS
+            gt_coords = [(0, 0), (0, 1080), (1920, 0), (1920, 1080)]
+
             if gt_coords is not None:
                 if logger.isEnabledFor(logging.DEBUG):
                     # Show the coordinates on the image
@@ -536,31 +541,6 @@ def execute_recovery_step(step, gt_coords, history, current_screenshot, problem,
                         "Action coordinates are outside the ground truth coordinates"
                     )
                     result = ActionResult.FAIL
-
-        else:
-            action = Action(
-                prompt=step,
-                raw=step,
-                action=action.action,
-                action_target=action.action_target,
-                coords=gt_coords,
-            )
-            result = ActionResult.SUCCESS
-            logger.info(f"Generated action: {action}")
-            log_variable(
-                "action_execution",
-                {
-                    "step": step,
-                    "action_type": action.action,
-                    "action_target": action.action_target,
-                    "action_coords": action.coords,
-                    "problem_id": problem.id,
-                },
-                {
-                    "plan_context": plan.steps,
-                    "history_length": len(history.actions) if history else 0,
-                },
-            )
 
         history.append(action, result)
         logger.debug("Added action to history with SUCCESS status")
@@ -643,14 +623,23 @@ def solve_problem(problem_id, max_retry_attempts=3):
         attempt = 0
 
         success = True
+        action_model = QwenOmniparserActionModel("Qwen/Qwen2.5-VL-72B-Instruct")
+        action_model.manual_load()
         for i, step in enumerate(plan.steps):
             logger.info(f"Executing step {i + 1} of {len(plan.steps)}: {step}")
 
             current_screenshot = Image.open(problem.expected_screenshots[i])
 
             gt_coords = coordinate_mapping.get(str(i + 1), None)
+
             result = execute_recovery_step(
-                step, gt_coords, history, current_screenshot, problem, plan
+                action_model,
+                step,
+                gt_coords,
+                history,
+                current_screenshot,
+                problem,
+                plan,
             )
 
             if result != ActionResult.SUCCESS:
@@ -671,6 +660,9 @@ def solve_problem(problem_id, max_retry_attempts=3):
                     },
                 )
                 success = False
+        action_model.manual_unload()
+        del action_model
+        torch.cuda.empty_cache()
 
         if success:
             # Log successful recovery
@@ -682,7 +674,7 @@ def solve_problem(problem_id, max_retry_attempts=3):
                     "steps_executed": len(plan.steps),
                     "total_actions": len(history.actions),
                 },
-                {"plan": plan.steps, "reasoning": plan.reasoning},
+                {"plan": plan.steps, "reasoning": plan.reasoning, "history": history},
             )
             logger.info("Recovery successful!")
 

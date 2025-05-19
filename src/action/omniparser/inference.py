@@ -101,8 +101,8 @@ def analyze_ui_image(
     labeled_image = Image.open(io.BytesIO(base64.b64decode(labeled_img_b64)))
 
     # Clean up models to free memory
-    if device == "cuda":
-        torch.cuda.empty_cache()
+    del som_model
+    torch.cuda.empty_cache()
 
     for i, _ in enumerate(parsed_content_list):
         parsed_content_list[i]["id"] = i
